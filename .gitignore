@@ -1,0 +1,15 @@
+# Personal network settings
+config/bba.config.ps1
+
+# Build output
+build/
+out/
+*.o
+*.elf
+*.bin
+*.iso
+*.cdi
+*.log
+
+# Written by the sample on the Dreamcast
+sample/hello_bba/data/from_dreamcast.txt
