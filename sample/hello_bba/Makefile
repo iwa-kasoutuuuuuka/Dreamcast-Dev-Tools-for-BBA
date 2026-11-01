@@ -4,11 +4,18 @@
 # build.ps1 runs this Makefile from PowerShell.
 
 TARGET = hello_bba.elf
-OBJS   = main.o
 
-# Folder of this sample as seen through dc-tool-ip's /pc/ (build.ps1 sets it, e.g.
-# /work/dc_bba_devkit/sample/hello_bba). Passed unquoted and stringified in main.c,
-# so the path must not contain spaces.
+DCDEV  = ../../lib/dcdev
+OBJS   = main.o \
+         $(DCDEV)/dcdev_core.o $(DCDEV)/dcdev_bmp.o $(DCDEV)/dcdev_screenshot.o \
+         $(DCDEV)/dcdev_log.o $(DCDEV)/dcdev_vmu.o $(DCDEV)/dcdev_asset.o \
+         $(DCDEV)/dcdev_prof.o
+
+KOS_CFLAGS += -I$(DCDEV)
+
+# host/ folder of this sample as seen through dc-tool-ip's /pc/ (build.ps1 sets it, e.g.
+# /work/Dreamcast-Dev-Tools-for-BBA/sample/hello_bba/host). Passed unquoted and
+# stringified in main.c, so the path must not contain spaces.
 ifneq ($(HOST_DIR_REL),)
   KOS_CFLAGS += -DHOST_DIR_RAW=/pc$(HOST_DIR_REL)
 endif

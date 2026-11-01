@@ -1,1 +1,0 @@
-Hello Dreamcast, this text was read from the PC over the Broadband Adapter.

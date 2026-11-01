@@ -1,0 +1,91 @@
+{
+    // Dreamcast BBA tasks. Ctrl+Shift+B = build the sample (debug).
+    // The Dreamcast IP comes from config/bba.config.ps1.
+    "version": "2.0.0",
+    "options": {
+        "shell": {
+            "executable": "powershell.exe",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+        }
+    },
+    "tasks": [
+        {
+            "label": "Dreamcast: build sample (debug)",
+            "type": "shell",
+            "command": "& '${workspaceFolder}/sample/hello_bba/build.ps1' -Debug",
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": {
+                "owner": "dreamcast-gcc",
+                "fileLocation": ["relative", "${workspaceFolder}/sample/hello_bba"],
+                "pattern": {
+                    "regexp": "^(.*?):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$",
+                    "file": 1, "line": 2, "column": 3, "severity": 4, "message": 5
+                }
+            }
+        },
+        {
+            "label": "Dreamcast: build sample (release)",
+            "type": "shell",
+            "command": "& '${workspaceFolder}/sample/hello_bba/build.ps1'",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Dreamcast: run sample",
+            "type": "shell",
+            "command": "& '${workspaceFolder}/scripts/dc_run.ps1' '${workspaceFolder}/sample/hello_bba/hello_bba.elf'",
+            "dependsOn": "Dreamcast: build sample (release)",
+            "problemMatcher": []
+        },
+        {
+            "label": "Dreamcast: run current ELF",
+            "type": "shell",
+            "command": "& '${workspaceFolder}/scripts/dc_run.ps1' '${input:elfPath}'",
+            "problemMatcher": []
+        },
+        {
+            // Used by launch.json: uploads the debug build with the GDB server on port 2159
+            // and stays running in the background (console output appears in this terminal).
+            "label": "Dreamcast: start sample with GDB server",
+            "type": "shell",
+            "command": "& '${workspaceFolder}/scripts/dc_run.ps1' '${workspaceFolder}/sample/hello_bba/hello_bba.elf' -Gdb",
+            "dependsOn": "Dreamcast: build sample (debug)",
+            "isBackground": true,
+            "problemMatcher": {
+                "owner": "dreamcast-dctool",
+                "pattern": { "regexp": "^__never__$" },
+                "background": {
+                    "activeBegins": true,
+                    "beginsPattern": "^dc-tool-ip ",
+                    "endsPattern": "Ctrl\\+C stops dc-tool-ip"
+                }
+            }
+        },
+        {
+            "label": "Dreamcast: reset (dcload)",
+            "type": "shell",
+            "command": "& '${workspaceFolder}/scripts/dc_reset.ps1' -Reset",
+            "problemMatcher": []
+        },
+        {
+            "label": "Dreamcast: profile report (sample)",
+            "type": "shell",
+            "command": "& '${workspaceFolder}/scripts/prof_report.ps1' '${workspaceFolder}/sample/hello_bba/host/prof/prof.csv' -Html",
+            "problemMatcher": []
+        },
+        {
+            "label": "Dreamcast: make dcload-ip disc",
+            "type": "shell",
+            "command": "& '${workspaceFolder}/scripts/make_dcload_disc.ps1'",
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "elfPath",
+            "type": "promptString",
+            "description": "ELF to upload to the Dreamcast",
+            "default": "${workspaceFolder}/sample/hello_bba/hello_bba.elf"
+        }
+    ]
+}

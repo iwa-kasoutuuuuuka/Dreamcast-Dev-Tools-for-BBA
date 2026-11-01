@@ -11,5 +11,11 @@ out/
 *.cdi
 *.log
 
-# Written by the sample on the Dreamcast
-sample/hello_bba/data/from_dreamcast.txt
+# Console logs saved by dc_run.ps1
+/logs/
+
+# Written by the sample on the Dreamcast (assets/ is kept)
+sample/hello_bba/host/screenshots/
+sample/hello_bba/host/logs/
+sample/hello_bba/host/prof/
+sample/hello_bba/host/vmu/

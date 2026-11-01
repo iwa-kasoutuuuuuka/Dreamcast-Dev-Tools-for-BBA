@@ -8,6 +8,17 @@ PowerShell スクリプト数本で行えるようにする環境です。
 CD-R を毎回焼く必要がなくなり、「ビルド → 数秒で実機起動 → ログを見る → 直す」の
 サイクルを回せます。
 
+さらに、自分のプログラムに組み込める小さな C ライブラリ **dcdev** と **VS Code 設定**が付いています。
+
+| 機能 | 使い方 |
+|---|---|
+| 画面キャプチャを PC に保存（BMP） | L+R トリガーを押しながら A、または `dcdev_screenshot()` |
+| ログを PC に自動保存 | `dc_run.ps1` が毎回 `logs\` に保存、Dreamcast 側は `dcdev_log()` |
+| VMU のセーブデータを PC と行き来 | L+R+X でバックアップ、L+R+Y で書き戻し |
+| アセットを PC から読み込み、編集したら即反映 | `dcdev_asset_load()` / `dcdev_asset_changed()` |
+| 処理時間の計測とグラフ | `dcdev_prof_begin/end()` → `prof_report.ps1 -Html` |
+| VS Code でビルド・実行・ブレークポイントデバッグ | `Ctrl+Shift+B` でビルド、`F5` で実機デバッグ |
+
 ```
  ┌──────────── Windows PC ────────────┐            ┌──────── Dreamcast ────────┐
  │ DreamSDK (KallistiOS / sh-elf-gcc)  │            │  dcload-ip（起動ディスク）  │
@@ -35,10 +46,12 @@ CD-R を毎回焼く必要がなくなり、「ビルド → 数秒で実機起�
 8. [CD イメージを焼かずに使う（/cd/ リダイレクト）](#8-cd-イメージを焼かずに使うcd-リダイレクト)
 9. [GDB でデバッグする](#9-gdb-でデバッグする)
 10. [自分のプロジェクトで使う](#10-自分のプロジェクトで使う)
-11. [トラブルシューティング](#11-トラブルシューティング)
-12. [制限事項・注意](#12-制限事項注意)
-13. [動作確認状況](#13-動作確認状況)
-14. [ライセンス・参考資料](#14-ライセンス参考資料)
+11. [開発支援ライブラリ dcdev](#11-開発支援ライブラリ-dcdev)
+12. [VS Code で使う](#12-vs-code-で使う)
+13. [トラブルシューティング](#13-トラブルシューティング)
+14. [制限事項・注意](#14-制限事項注意)
+15. [動作確認状況](#15-動作確認状況)
+16. [ライセンス・参考資料](#16-ライセンス参考資料)
 
 ---
 
@@ -73,24 +86,32 @@ CD-R を毎回焼く必要がなくなり、「ビルド → 数秒で実機起�
 ```
 Dreamcast-Dev-Tools-for-BBA/
 ├─ README.md                    このファイル
+├─ .vscode/                     VS Code 設定（タスク、F5 デバッグ、IntelliSense）
 ├─ config/
 │   └─ bba.config.example.ps1   設定の雛形（bba.config.ps1 にコピーして使う）
 ├─ scripts/
 │   ├─ _common.ps1              共通設定（DreamSDK のパス、設定読み込み）
 │   ├─ make_dcload_disc.ps1     dcload-ip 起動ディスク(.cdi)を作る
-│   ├─ dc_run.ps1               .elf を転送して実行、コンソール/ファイルサーバー
+│   ├─ dc_run.ps1               .elf を転送して実行、コンソール/ファイルサーバー/ログ保存
 │   ├─ dc_gdb.ps1               GDB 付きで実行（dc-tool-ip + sh-elf-gdb）
-│   └─ dc_reset.ps1             疎通確認(ping)とリセット
+│   ├─ dc_reset.ps1             疎通確認(ping)とリセット
+│   ├─ dc_prepare_host.ps1      dcdev が書き込むフォルダを PC 側に作る
+│   └─ prof_report.ps1          処理時間 CSV の集計と HTML グラフ
+├─ lib/dcdev/                   開発支援ライブラリ（Dreamcast 側の C コード）
+│   ├─ dcdev.h                  API（ここだけ読めば使えます）
+│   └─ dcdev_*.c                画面キャプチャ / ログ / VMU / アセット / 計測 / ボタン操作
 ├─ gdb/
 │   └─ dreamcast.gdbinit        GDB 設定（SH4、タイムアウト等）
-└─ sample/hello_bba/            動作確認用サンプル
-    ├─ main.c                   printf / /pc/ 読み書き / GDB / START で dcload に戻る
+└─ sample/hello_bba/            動作確認用サンプル（全機能を使う）
+    ├─ main.c
     ├─ Makefile                 KallistiOS 標準の Makefile
-    ├─ build.ps1                PowerShell からビルド
-    └─ data/hello.txt           Dreamcast から読むファイル
+    ├─ build.ps1                PowerShell からビルド（host\ フォルダも準備）
+    └─ host/                    Dreamcast から /pc/ で見えるフォルダ
+        ├─ assets/message.txt   画面に表示する文字列（編集すると即反映）
+        ├─ screenshots/ logs/ prof/ vmu/a1/ ...   実行すると Dreamcast が書き込む
 ```
 
-`build/`・`out/`・`config/bba.config.ps1` は `.gitignore` 済みです。
+`build/`・`out/`・`logs/`・`config/bba.config.ps1`・サンプルの書き出しフォルダは `.gitignore` 済みです。
 
 ---
 
@@ -254,14 +275,15 @@ dc-tool-ip -t 192.168.1.200 -x ...\hello_bba.elf
 ...
 Sending data ...
 Executing at <0x8c010000>
+[dcdev] host folder /pc/work/Dreamcast-Dev-Tools-for-BBA/sample/hello_bba/host
 [hello_bba] KOS 2.3.0 ..., dcload type 1 (1 = dcload-ip)
-[hello_bba] host file says: Hello Dreamcast, this text was read from the PC ...
-[hello_bba] wrote /pc/.../data/from_dreamcast.txt
+[dcdev] asset message.txt <- /pc/.../host/assets/message.txt
 [hello_bba] frame 0
-[hello_bba] frame 60
 ```
 
-- Dreamcast 画面に「Hello from the BBA!」が出ます。
+- Dreamcast 画面に「Hello from the BBA!」と `host\assets\message.txt` の内容が出ます。
+- PC で `message.txt` を編集して保存すると、約 0.5 秒で画面の文字が変わります。
+- **L+R トリガーを押しながら A** で画面キャプチャが `host\screenshots\shot_0001.bmp` に保存されます（11章）。
 - **START ボタン**でプログラムが `return 0` し、**dcload-ip に戻ります**。電源を切らずに次の転送ができます。
 - PC 側は `Ctrl+C` で dc-tool-ip を止めます（Dreamcast 側のプログラムは動き続けます）。
 
@@ -271,7 +293,8 @@ Executing at <0x8c010000>
 |---|---|
 | `-Ip <IP>` | Dreamcast の IP（設定ファイルより優先） |
 | `-Fast` | `-f`：FIFO 待ちを無くして高速転送（パケットロスが出る環境では外す） |
-| `-Log <file>` | コンソール出力をファイルにも保存 |
+| `-Log <file>` | コンソール出力の保存先（既定：`logs\dc_日付_時刻.txt` に毎回自動保存） |
+| `-NoLog` | コンソール出力を保存しない |
 | `-Iso <file.iso>` | ISO を Dreamcast の `/cd/` として見せる（8章） |
 | `-CdDir <folder>` | フォルダから一時 ISO を作って `/cd/` として見せる（8章） |
 | `-Gdb` | GDB サーバー（ポート 2159）を開く（普通は `dc_gdb.ps1` を使う） |
@@ -440,7 +463,146 @@ if (dcload_type == DCLOAD_TYPE_IP) {
 
 ---
 
-## 11. トラブルシューティング
+## 11. 開発支援ライブラリ dcdev
+
+`lib/dcdev/` は、自分のプログラムに組み込んで使う Dreamcast 側の小さな C ライブラリです。
+すべて `/pc/` 経由で PC とやり取りするので、**dc-tool-ip で起動したときだけ動きます**。
+ディスクから起動したときは何もせずエラーを返すだけなので、製品版に残しても害はありません。
+
+### 11-1. 組み込み方
+
+1. `lib/dcdev/*.c` をビルドに加え、`-I lib/dcdev` を付ける（サンプルの `Makefile` 参照）。
+2. PC 側に書き込み用フォルダを作る（dcload はフォルダを作れないため）：
+   ```powershell
+   .\scripts\dc_prepare_host.ps1 C:\work\mygame\host
+   ```
+   `screenshots\ logs\ assets\ prof\ vmu\a1\ … vmu\d2\` ができ、`dcdev_init()` に渡す `/pc/` パスが表示されます。
+3. プログラムの最初で初期化し、毎フレーム `dcdev_poll()` を呼ぶ：
+   ```c
+   #include "dcdev.h"
+
+   dcdev_init("/pc/work/mygame/host");   /* 2. で表示されたパス */
+   for (;;) {
+       dcdev_poll();         /* L+R トリガー + ボタンの操作を処理 */
+       ...
+       dcdev_prof_frame();   /* 計測を使う場合 */
+       vid_waitvbl();
+   }
+   ```
+
+### 11-2. ボタン操作（`dcdev_poll()`）
+
+コントローラー A ポートで **L と R のトリガーを両方深く押したまま**：
+
+| ボタン | 動作 |
+|---|---|
+| A | 画面キャプチャ → `host\screenshots\shot_0001.bmp`（番号は自動で増える） |
+| X | VMU（A ポートの 1 番スロット）のデータファイルを `host\vmu\a1\` にバックアップ |
+| Y | `host\vmu\a1\` のファイルを VMU に書き戻す（同名ファイルは上書き） |
+| B | 処理時間の集計をコンソールに表示 |
+
+### 11-3. 画面キャプチャ
+
+```c
+dcdev_screenshot(NULL);          /* 自動番号 shot_NNNN.bmp */
+dcdev_screenshot("title.bmp");   /* 名前を指定 */
+```
+
+- 今表示しているフレームバッファを 24bit BMP で保存します（Windows の標準ビューアで開けます）。
+- 全ビデオモード（RGB555 / RGB565 / RGB888 / RGB0888）に対応。640×480 で約 900 KB、転送に 1 秒前後かかります。
+- PVR（3D）で描いた画面も、表示中のフレームバッファなので撮れます。
+
+### 11-4. ログ
+
+- **PC 側**：`dc_run.ps1` はコンソール出力を毎回 `logs\dc_日付_時刻.txt` に保存します（`-NoLog` で無効）。
+- **Dreamcast 側**：`dcdev_log()` は `printf` と同じ書式で、コンソールに出しつつ `host\logs\dc_log.txt` に**起動からのミリ秒付き**で追記します。
+  1 行ごとに書き込むので、プログラムが固まってもそこまでのログは残ります。
+
+```c
+dcdev_log("player hp=%d stage=%d\n", hp, stage);
+```
+
+### 11-5. VMU のセーブデータを PC と行き来
+
+```c
+dcdev_vmu_backup(0, 1);    /* A ポート 1 番スロット → host\vmu\a1\ */
+dcdev_vmu_restore(0, 1);   /* host\vmu\a1\ → VMU */
+```
+
+- データファイル（セーブ）だけを対象にします。VMU ミニゲームは対象外です。
+- ファイルは VMU 上のデータそのまま（VMS ヘッダー込み）で保存されます。名前は VMU のファイル名（最大 12 文字）。
+- 「特定のセーブデータから始めたい」テストや、セーブ破損の再現に使えます。書き戻しは同名ファイルを上書きするので注意してください。
+
+### 11-6. アセットの読み込みと即時反映
+
+```c
+size_t size;
+void *tex = dcdev_asset_load("player.pvr", &size);   /* host\assets\player.pvr */
+...
+if (dcdev_asset_changed("player.pvr")) {             /* PC で上書き保存されたら 1 */
+    free(tex);
+    tex = dcdev_asset_load("player.pvr", &size);
+    /* テクスチャを作り直す */
+}
+```
+
+- `dcdev_asset_load()` は `host\assets\` → `/cd/` → `/rd/` の順に探します。
+  開発中は PC のファイル、ディスク起動では CD のファイルが自動で使われます。
+- `dcdev_asset_changed()` は PC 上のファイルの更新日時とサイズを見ます。1 ファイルにつき 0.5 秒に 1 回しか問い合わせないので、毎フレーム呼んでも大丈夫です（最大 32 ファイル）。
+- 画像・音・テキスト・パラメーター表などを、**プログラムを再転送せずに**調整できます。
+
+### 11-7. 処理時間の計測
+
+```c
+dcdev_prof_begin("update");  update_game();  dcdev_prof_end("update");
+dcdev_prof_begin("render");  render();       dcdev_prof_end("render");
+dcdev_prof_frame();          /* 1 フレームの終わりに */
+```
+
+- 名前は文字列リテラルで渡してください（ポインターで区別します。最大 16 区間）。
+- 60 フレームごとに区間ごとの平均・最大（マイクロ秒）を `host\prof\prof.csv` に書きます（`dcdev_prof_set_interval()` で変更可）。
+- PC で集計：
+  ```powershell
+  .\scripts\prof_report.ps1 .\sample\hello_bba\host\prof\prof.csv -Html
+  ```
+  区間ごとの平均・最悪値・1 フレーム（16.7 ms）に対する割合を表示し、`-Html` で折れ線グラフ（`prof_report.html`）も作ります。
+  60 fps 以外は `-BudgetUs 33367`（30 fps）などで基準を変えられます。
+
+### 11-8. API 一覧
+
+詳しくは [`lib/dcdev/dcdev.h`](lib/dcdev/dcdev.h) を見てください。
+
+| 関数 | 内容 |
+|---|---|
+| `dcdev_init(host_dir)` / `dcdev_available()` | 初期化 / `/pc/` が使えるか |
+| `dcdev_poll()` | L+R ボタン操作の処理 |
+| `dcdev_screenshot(name)` | 画面キャプチャ（BMP） |
+| `dcdev_log(fmt, ...)` / `dcdev_log_close()` | コンソール + ファイルにログ |
+| `dcdev_vmu_backup(port, unit)` / `dcdev_vmu_restore(port, unit)` | VMU ⇔ PC |
+| `dcdev_asset_load(name, &size)` / `dcdev_asset_changed(name)` | アセット読み込み / 変更検出 |
+| `dcdev_prof_begin/end(name)`、`dcdev_prof_frame()`、`dcdev_prof_print()` | 処理時間の計測 |
+
+---
+
+## 12. VS Code で使う
+
+このフォルダを VS Code で開くと、`.vscode/` の設定がそのまま使えます。
+拡張機能 **C/C++（ms-vscode.cpptools）** を入れてください（開いたときに推奨が表示されます）。
+
+| 操作 | 内容 |
+|---|---|
+| `Ctrl+Shift+B` | サンプルをデバッグビルド（エラーは「問題」パネルに表示） |
+| `F5` | デバッグビルド → 実機へ転送（GDB サーバー付き）→ GDB 接続。ソース上でブレークポイント、変数の確認、ステップ実行ができます |
+| `Ctrl+Shift+P` → 「タスクの実行」 | `Dreamcast: run sample`、`run current ELF`、`reset`、`profile report`、`make dcload-ip disc` |
+
+- Dreamcast の IP は `config\bba.config.ps1` から読みます。
+- コンソール出力は「ターミナル」パネルに出ます。デバッグを止めたあとは、そのターミナルのタスクも止めてください（ゴミ箱アイコン）。
+- 自分のプログラムで使うには、`launch.json` の `program` と、`tasks.json` のビルド・起動タスクの ELF パスを書き換えます。
+- IntelliSense 用に KallistiOS のインクルードパスを `c_cpp_properties.json` に設定済みです（DreamSDK が `C:\DreamSDK` 以外なら書き換えてください）。
+
+---
+
+## 13. トラブルシューティング
 
 | 症状 | 原因と対処 |
 |---|---|
@@ -456,10 +618,14 @@ if (dcload_type == DCLOAD_TYPE_IP) {
 | `make_dcload_disc.ps1 -Ip` が失敗 | DreamSDK Manager で KallistiOS / dcload が導入済みか確認。`C:\DreamSDK\usr\bin\bash.exe` があるか |
 | `.ps1 を読み込めません` | 実行ポリシー：`Set-ExecutionPolicy -Scope Process Bypass` |
 | `DreamSDK ... not found` | DreamSDK のインストール先を `DREAMSDK_HOME` に設定 |
+| `[dcdev] ... does the screenshots folder exist?` など | PC 側にフォルダが無い。`dc_prepare_host.ps1` を実行（サンプルは `build.ps1` が自動で作る） |
+| L+R+ボタンが反応しない | トリガーを奥まで押す（値 200 以上）。`dcdev_poll()` を毎フレーム呼んでいるか確認 |
+| VMU の書き戻しが失敗 | VMU の空き容量不足。ファイルサイズが 512 バイトの倍数でないものは無視されます |
+| F5 で GDB が繋がらない | 前回の「start sample with GDB server」タスクが残っている。ターミナルで止めてから再実行 |
 
 ---
 
-## 12. 制限事項・注意
+## 14. 制限事項・注意
 
 - **Windows 版 dc-tool-ip は `/pc/` の範囲を制限できません**（ドライブのルート全体が見えます）。信頼できない LAN で起動したままにしないでください。
 - dcload の通信は暗号化も認証もありません。家庭内 LAN などでだけ使ってください。
@@ -471,19 +637,22 @@ if (dcload_type == DCLOAD_TYPE_IP) {
 
 ---
 
-## 13. 動作確認状況
+## 15. 動作確認状況
 
 | 項目 | 状況 |
 |---|---|
-| サンプル `hello_bba` のビルド（通常 / `-Debug`） | 確認済み（DreamSDK R4, KOS 2.3.0） |
+| サンプル `hello_bba` + dcdev のビルド（通常 / `-Debug`、`-Wall -Wextra` で警告なし） | 確認済み（DreamSDK R4, KOS 2.3.0） |
 | GDB 用デバッグ情報（`sh-elf-gdb` でソース行解決） | 確認済み |
+| BMP 書き出し（向き・色・行パディング）を PC 上でテスト | 確認済み |
+| `prof_report.ps1` の集計と HTML グラフ（サンプルデータ） | 確認済み |
 | `make_dcload_disc.ps1`（DHCP 版 / 固定 IP 再ビルド版 / Audio/Data 版）の CDI 生成 | 確認済み |
 | `dc_run.ps1` の ISO 作成と dc-tool-ip 起動（実機なし） | 確認済み |
-| 実機 + BBA での転送・コンソール・`/pc/`・`/cd/`・GDB | **未確認**（実機での確認結果を Issue / PR で歓迎します） |
+| VS Code 設定ファイルの書式 | 確認済み（実機での F5 デバッグは未確認） |
+| 実機 + BBA での転送・コンソール・`/pc/`・`/cd/`・GDB・画面キャプチャ・VMU・アセット即時反映 | **未確認**（実機での確認結果を Issue / PR で歓迎します） |
 
 ---
 
-## 14. ライセンス・参考資料
+## 16. ライセンス・参考資料
 
 ### ライセンス
 

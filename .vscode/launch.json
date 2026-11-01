@@ -1,0 +1,27 @@
+{
+    // F5 = build the sample with -g -O0 + GDB stub, upload it over the BBA,
+    // and attach sh-elf-gdb. Needs the "C/C++" extension (ms-vscode.cpptools).
+    // For your own program, copy this entry and change "program" and the preLaunchTask.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Dreamcast: debug sample over BBA",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/sample/hello_bba/hello_bba.elf",
+            "cwd": "${workspaceFolder}/sample/hello_bba",
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:/DreamSDK/opt/toolchains/dc/sh-elf/bin/sh-elf-gdb.exe",
+            "miDebuggerServerAddress": "127.0.0.1:2159",
+            "stopAtConnect": true,
+            "preLaunchTask": "Dreamcast: start sample with GDB server",
+            "setupCommands": [
+                { "text": "set architecture sh4" },
+                { "text": "set endian little" },
+                { "text": "set remotetimeout 60" },
+                { "text": "set tcp connect-timeout 60" },
+                { "text": "set print pretty on" }
+            ]
+        }
+    ]
+}

@@ -9,7 +9,8 @@
 .PARAMETER CdDir    Folder to turn into a temporary ISO and serve as /cd/ (e.g. a game's disc folder).
 .PARAMETER Fast     Pass -f (no FIFO delays, faster upload, may drop packets).
 .PARAMETER Gdb      Also start the GDB server on port 2159 (use dc_gdb.ps1 to start GDB as well).
-.PARAMETER Log      Also write the console output to this file.
+.PARAMETER Log      Write the console output to this file. Default: logs\dc_<date>_<time>.txt in the devkit.
+.PARAMETER NoLog    Do not save the console output.
 .PARAMETER PcRoot   Directory whose DRIVE becomes /pc/ (default: the ELF's folder). dc-tool-ip on Windows
                     serves /pc/<path> as <current drive>:\<path>, so /pc/ = the root of that drive.
 
@@ -25,6 +26,7 @@ param(
     [switch]$Fast,
     [switch]$Gdb,
     [string]$Log,
+    [switch]$NoLog,
     [string]$PcRoot
 )
 . "$PSScriptRoot\_common.ps1"
@@ -56,8 +58,22 @@ Write-Host "/pc/ = $($root.Substring(0,3))   (e.g. this ELF's folder is /pc$(Con
 Write-Host 'Ctrl+C stops dc-tool-ip (the Dreamcast keeps running; reset it or use dc_reset.ps1 once dcload is back).'
 Write-Host ''
 
+if (-not $NoLog -and -not $Log) {
+    $logDir = Join-Path $DevkitRoot 'logs'
+    New-Item -ItemType Directory -Force $logDir | Out-Null
+    $Log = Join-Path $logDir ('dc_' + (Get-Date -Format 'yyyyMMdd_HHmmss') + '.txt')
+}
+if ($Log -and -not $NoLog) {
+    $Log = [System.IO.Path]::GetFullPath($Log)
+    Write-Host "Console log: $Log"
+}
+
 Push-Location $root
 try {
-    if ($Log) { & $dctool @dcArgs | Tee-Object -FilePath $Log }
-    else      { & $dctool @dcArgs }
+    if ($Log -and -not $NoLog) {
+        "# dc-tool-ip $($dcArgs -join ' ')  ($(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))" | Out-File -Encoding utf8 $Log
+        & $dctool @dcArgs | ForEach-Object { $_; $_ | Out-File -Append -Encoding utf8 $Log }
+    } else {
+        & $dctool @dcArgs
+    }
 } finally { Pop-Location }

@@ -1,0 +1,21 @@
+{
+    // IntelliSense for KallistiOS code (DreamSDK in C:\DreamSDK).
+    "configurations": [
+        {
+            "name": "Dreamcast (KallistiOS)",
+            "compilerPath": "C:/DreamSDK/opt/toolchains/dc/sh-elf/bin/sh-elf-gcc.exe",
+            "compilerArgs": ["-ml", "-m4-single-only"],
+            "includePath": [
+                "${workspaceFolder}/**",
+                "C:/DreamSDK/opt/toolchains/dc/kos/include",
+                "C:/DreamSDK/opt/toolchains/dc/kos/kernel/arch/dreamcast/include",
+                "C:/DreamSDK/opt/toolchains/dc/kos/addons/include",
+                "C:/DreamSDK/opt/toolchains/dc/kos-ports/include"
+            ],
+            "defines": ["_arch_dreamcast", "_arch_sub_pristine", "USE_GDB"],
+            "cStandard": "gnu17",
+            "intelliSenseMode": "gcc-x86"
+        }
+    ],
+    "version": 4
+}

@@ -1,0 +1,1 @@
+Edit host/assets/message.txt on the PC - it reloads live.
