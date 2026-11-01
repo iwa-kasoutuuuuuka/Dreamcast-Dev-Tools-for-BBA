@@ -22,7 +22,8 @@ void dcdev_log(const char *fmt, ...) {
         return;
     if (!g_log) {
         char path[384];
-        g_log = fopen(dcdev_path("logs/dc_log.txt", path, sizeof(path)), "a");
+        /* binary mode: LF line ends on every platform */
+        g_log = fopen(dcdev_path("logs/dc_log.txt", path, sizeof(path)), "ab");
         if (!g_log) {
             g_log_failed = 1;
             printf("[dcdev] log: cannot open %s (does the logs folder exist?)\n", path);

@@ -76,8 +76,9 @@ void dcdev_prof_set_interval(int frames);
 void dcdev_prof_print(void);
 
 /* ---- button combos ---- */
-/* Call once per frame. Handles the L+R combos above for controller port A.
-   Returns the button that fired (CONT_A etc.) or 0. */
+/* Call once per frame. Handles the L+R combos above on the first controller found
+   (normally port A). A combo fires once when the button is pressed while both
+   triggers are held. Returns the button that fired (CONT_A etc.) or 0. */
 uint32_t dcdev_poll(void);
 
 #ifdef __cplusplus

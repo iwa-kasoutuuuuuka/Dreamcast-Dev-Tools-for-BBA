@@ -63,7 +63,7 @@ int dcdev_vmu_backup(int port, int unit) {
 }
 
 int dcdev_vmu_restore(int port, int unit) {
-    char tag[3], rel[64], dirpath[384], path[640];
+    char tag[3], rel[64], dirpath[384], path[384 + 1 + 256 + 8];
     maple_device_t *dev;
     DIR *d;
     struct dirent *de;

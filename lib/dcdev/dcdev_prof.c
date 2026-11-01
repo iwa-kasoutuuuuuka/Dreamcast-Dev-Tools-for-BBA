@@ -58,7 +58,7 @@ static void write_csv(void) {
         return;
     if (!g_csv) {
         char path[384];
-        g_csv = fopen(dcdev_path("prof/prof.csv", path, sizeof(path)), "w");
+        g_csv = fopen(dcdev_path("prof/prof.csv", path, sizeof(path)), "wb");
         if (!g_csv) {
             g_csv_failed = 1;
             printf("[dcdev] prof: cannot create %s (does the prof folder exist?)\n", path);

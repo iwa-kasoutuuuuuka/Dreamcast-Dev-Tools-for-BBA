@@ -71,8 +71,14 @@ if ($Log -and -not $NoLog) {
 Push-Location $root
 try {
     if ($Log -and -not $NoLog) {
-        "# dc-tool-ip $($dcArgs -join ' ')  ($(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))" | Out-File -Encoding utf8 $Log
-        & $dctool @dcArgs | ForEach-Object { $_; $_ | Out-File -Append -Encoding utf8 $Log }
+        # One writer for the whole run (opening the file per line slows a chatty program down,
+        # because dc-tool-ip waits for the pipe). AutoFlush keeps the log complete after a crash.
+        $writer = New-Object System.IO.StreamWriter($Log, $false, (New-Object System.Text.UTF8Encoding($false)))
+        $writer.AutoFlush = $true
+        try {
+            $writer.WriteLine("# dc-tool-ip $($dcArgs -join ' ')  ($(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))")
+            & $dctool @dcArgs | ForEach-Object { $_; $writer.WriteLine($_) }
+        } finally { $writer.Dispose() }
     } else {
         & $dctool @dcArgs
     }

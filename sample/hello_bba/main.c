@@ -45,18 +45,23 @@ static void load_message(void) {
     free(text);
 }
 
-static void draw_screen(int frame) {
-    char line[64];
-
-    dcdev_prof_begin("draw");
+/* Full redraw only when the text changes; clearing the single framebuffer
+   every few frames would flicker. */
+static void draw_static(void) {
     vid_clear(16, 24, 48);
     bfont_draw_str(vram_s + 640 * 80 + 40, 640, 0, "Hello from the BBA!");
     bfont_draw_str(vram_s + 640 * 140 + 40, 640, 0, g_message);
     bfont_draw_str(vram_s + 640 * 260 + 40, 640, 0, "Hold L+R: A shot  X VMU backup");
     bfont_draw_str(vram_s + 640 * 290 + 40, 640, 0, "          Y VMU restore  B profile");
     bfont_draw_str(vram_s + 640 * 330 + 40, 640, 0, "START: back to dcload");
-    snprintf(line, sizeof(line), "frame %d", frame);
-    bfont_draw_str(vram_s + 640 * 400 + 40, 640, 0, line);
+}
+
+static void draw_counter(int frame) {
+    char line[32];
+
+    dcdev_prof_begin("draw");
+    snprintf(line, sizeof(line), "frame %-10d", frame);
+    bfont_draw_str(vram_s + 640 * 400 + 40, 640, 1, line);   /* opaque: overwrites the old digits */
     dcdev_prof_end("draw");
 }
 
@@ -84,6 +89,7 @@ int main(int argc, char **argv) {
     vid_set_mode(DM_640x480, PM_RGB565);
     load_message();
     dcdev_asset_changed("message.txt");   /* start watching */
+    draw_static();
 
     for (;;) {
         maple_device_t *cont = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
@@ -97,12 +103,13 @@ int main(int argc, char **argv) {
             dcdev_log("[hello_bba] combo used at frame %d\n", frame);
         if (dcdev_asset_changed("message.txt")) {
             load_message();
+            draw_static();
             dcdev_log("[hello_bba] message reloaded: %s\n", g_message);
         }
 
         busy_logic();
-        if ((frame % 10) == 0)     /* redraw a few times a second */
-            draw_screen(frame);
+        if ((frame % 10) == 0)     /* update the counter a few times a second */
+            draw_counter(frame);
 
         if ((frame % 600) == 0)
             dcdev_log("[hello_bba] frame %d\n", frame);
