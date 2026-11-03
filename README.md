@@ -38,6 +38,30 @@ GDEMU の GDmenu から dcload-ip を起動しておけば、あとは PC 側が
 
 > `/cd/` リダイレクト（`-i`）は KallistiOS 2.3 のプログラムでは動きません（[8 章](#8-cd-イメージを焼かずに使うcd-リダイレクト)）。
 
+### 新機能：BBA 経由のメモリーカード（VMU）編集 `dc_vmu`（2026-11）
+
+[VMU Workbench](https://github.com/iwa-kasoutuuuuuka/vmu-workbench)（MIT、`third_party\vmu-workbench`）を取り込み、
+実機の VMU を PC で編集できるようにしました。詳しくは [11-9 章](#11-9-vmu-を丸ごと吸い出して編集するdc_vmups1)。
+
+| 機能 | 使い方 | 実機 |
+|---|---|---|
+| VMU を丸ごと（128KB、ミニゲーム・コピー禁止のファイルも）PC に吸い出す | `scripts\dc_vmu.ps1 -Dump` | 確認済み（2026-11-03、PC との読み書きは 4KB ずつ） |
+| イメージを VMU に書き戻す（先に今の中身を控えとして吸い出し、全ブロックを読み直して確認） | `dc_vmu.ps1 -Restore <img>` | 確認済み（2026-11-03、同じ内容を書き戻して全ブロックの読み直しが一致） |
+| bleem2 の PS1 メモリーカード（`BLEEMMC`）を `.mcr` で出し入れ（MemcardRex などで編集） | `dc_vmu.ps1 -ExportPs1 card.mcr` / `-ImportPs1 card.mcr` | PC 上で確認 |
+| セーブの一覧・HEX / アイコン / 名前付きの値の編集（ブラウザの GUI） | `dc_vmu.ps1 -List` / `-Gui` | PC 上で確認 |
+
+### 新機能：AI エージェント（Antigravity / Claude Code）対応（2026-11）
+
+このフォルダをワークスペースとして開くと、エージェントが実機デバッグと VMU 編集の手順を使えます。詳しくは [12-1 章](#12-1-ai-エージェントantigravity--claude-codeで使う)。
+
+| 内容 | Antigravity | Claude Code |
+|---|---|---|
+| skill `dreamcast-bba-debug`（dc_auto / dc_vmu の使い方と、実機を壊さないための決まり） | `.agent/skills/` | `.claude/skills/` |
+| skill `vmu-save-analysis`（VMU Workbench のセーブ解析の手順） | `.agent/skills/` | `.claude/skills/` |
+| ルール（実機に送る前・VMU に書く前は利用者に確認、など） | `.agent/rules/` | skill の中に同じ内容 |
+| ワークフロー `/dc-debug`・`/vmu-edit` | `.agent/workflows/` | — |
+| MCP サーバー `dc-vmu`（VMU Workbench のツール 19 個：一覧・差分・値探し・書き換えなど） | `scripts\setup_agent_mcp.ps1` で登録 | `.mcp.json`（登録済み） |
+
 ```
  ┌──────────── Windows PC ────────────┐            ┌──────── Dreamcast ────────┐
  │ DreamSDK (KallistiOS / sh-elf-gcc)  │            │  dcload-ip（起動ディスク）  │
@@ -70,7 +94,7 @@ GDEMU の GDmenu から dcload-ip を起動しておけば、あとは PC 側が
 9. [GDB でデバッグする](#9-gdb-でデバッグする)
 10. [自分のプロジェクトで使う](#10-自分のプロジェクトで使う)
 11. [開発支援ライブラリ dcdev](#11-開発支援ライブラリ-dcdev)
-12. [VS Code で使う](#12-vs-code-で使う)
+12. [VS Code・AI エージェントで使う](#12-vs-codeai-エージェントで使う)
 13. [トラブルシューティング](#13-トラブルシューティング)
 14. [制限事項・注意](#14-制限事項注意)
 15. [動作確認状況](#15-動作確認状況)
@@ -120,6 +144,9 @@ Dreamcast-Dev-Tools-for-BBA/
 │   ├─ make_dcload_disc.ps1     dcload-ip 起動ディスク(.cdi)を作る
 │   ├─ dc_run.ps1               .elf を転送して実行、コンソール/ファイルサーバー/ログ保存
 │   ├─ dc_auto.ps1              自動デバッグループ（ビルド・待機・実行・クラッシュ解析・-Watch・-Regress）
+│   ├─ dc_vmu.ps1               実機 VMU の吸い出し・書き戻し、PS1 メモリーカード（.mcr）の出し入れ
+│   ├─ sync_vmu_workbench.ps1   VMU Workbench を third_party\ に取り込み直す
+│   ├─ setup_agent_mcp.ps1      Antigravity に MCP サーバー dc-vmu を登録（-Remove で外す）
 │   ├─ setup_pc_network.ps1     PC の固定 IP とファイアウォール（管理者で 1 回）
 │   ├─ dc_gdb.ps1               GDB 付きで実行（dc-tool-ip + sh-elf-gdb）
 │   ├─ dc_reset.ps1             疎通確認(ping)とリセット
@@ -132,6 +159,10 @@ Dreamcast-Dev-Tools-for-BBA/
 │   └─ run_tests.ps1            ビルドして実行
 ├─ gdb/
 │   └─ dreamcast.gdbinit        GDB 設定（SH4、タイムアウト等）
+├─ third_party/vmu-workbench/   VMU Workbench（MIT）の写し。VMU エディタ（CLI・GUI・MCP サーバー）と転送プログラム emu/vmutransfer
+├─ .agent/                      Antigravity 用の skill・ルール・ワークフロー
+├─ .claude/skills/              Claude Code 用の skill（.agent/skills と同じ内容）
+├─ .mcp.json                    Claude Code 用の MCP 設定（dc-vmu）
 └─ sample/hello_bba/            動作確認用サンプル（全機能を使う）
     ├─ main.c
     ├─ Makefile                 KallistiOS 標準の Makefile
@@ -569,6 +600,8 @@ dcdev_vmu_restore(0, 1);   /* host\vmu\a1\ → VMU */
 - ファイルは VMU 上のデータそのまま（VMS ヘッダー込み）で保存されます。名前は VMU のファイル名（最大 12 文字）。
 - 「特定のセーブデータから始めたい」テストや、セーブ破損の再現に使えます。書き戻しは同名ファイルを上書きするので注意してください。
 
+- VMU を丸ごと移したい・ミニゲームも含めたい・中身を編集したいときは、次の `dc_vmu.ps1` を使ってください（[11-9](#11-9-vmu-を丸ごと吸い出して編集するdc_vmups1)）。
+
 ### 11-6. アセットの読み込みと即時反映
 
 ```c
@@ -621,7 +654,54 @@ dcdev_prof_frame();          /* 1 フレームの終わりに */
 
 ---
 
-## 12. VS Code で使う
+### 11-9. VMU を丸ごと吸い出して編集する（`dc_vmu.ps1`）
+
+dcdev を組み込まなくても使えます。GDmenu から dcload-ip を起動しておき、PC で次を実行します（PowerShell）。
+
+```powershell
+.\scripts\dc_vmu.ps1 -Dump                     # A1 の VMU → logs\vmu\a1_<日時>.bin、ファイル一覧を表示
+.\scripts\dc_vmu.ps1 -ExportPs1 card.mcr       # 最新の吸い出しから bleem2 の PS1 カードを card.mcr に
+#   card.mcr を MemcardRex などで編集（セーブの追加・削除・別のカードからのコピー）
+.\scripts\dc_vmu.ps1 -ImportPs1 card.mcr       # → logs\vmu\a1_<日時>_ps1.bin（元の吸い出しはそのまま）
+.\scripts\dc_vmu.ps1 -Restore .\logs\vmu\a1_<日時>_ps1.bin   # VMU に書き戻す（yes と入力して確定）
+```
+
+- 仕組み：`third_party\vmu-workbench\emu\vmutransfer` を `dc_auto.ps1` でビルド・転送します。プログラムは PC の
+  `logs\vmu\vmu_cmd` を読んで吸い出し・書き戻しを行い、結果を `vmu_result.txt` に書いて dcload に戻ります。
+  ブロック単位で読み書きするので、ファイルシステムを介さずに VMU を丸ごと移せます。
+- 書き戻しの前には必ず今の VMU を `logs\vmu\<スロット>_<日時>_before.bin` に吸い出します。書いたブロックは
+  1 つずつ読み直して確認します。元に戻すときは `-Restore` にこの `_before.bin` を渡してください。
+- 別のスロットは `-Slot b1` など（コントローラーのポート a〜d、スロット 1〜2）。
+- `-List`（一覧）と `-Gui`（ブラウザで VMU Workbench を開く：HEX 編集・アイコン・説明文・名前付きの値・差分）は
+  [Node.js](https://nodejs.org/) が必要です。イメージを書き換える前の版は `logs\vmu\history\` に残ります。
+- bleem2 の PS1 セーブは `BLEEMMC`（PS1 メモリーカード 128KB を圧縮したもの）に入っています。`.mcr` にすると
+  PS1 用のツールがそのまま使えます。メタルスラッグ X のセーブは、VMU Workbench の構造定義でランキングなどを
+  名前で書き換えられます（`node third_party\vmu-workbench\cli.js fields <img> BLEEMMC`）。
+- VMU Workbench を更新したら `scripts\sync_vmu_workbench.ps1 -From <vmu-workbench のフォルダ>` で取り込み直します（取り込むのは元のリポジトリでコミット済みの内容だけです。作業途中の変更は入りません）。
+
+## 12. VS Code・AI エージェントで使う
+
+### 12-1. AI エージェント（Antigravity / Claude Code）で使う
+
+**Antigravity**：このリポジトリのフォルダをワークスペースとして開くと、`.agent/skills`・`.agent/rules`・`.agent/workflows` が読まれます。
+「実機で動かしてログを見て」「VMU を吸い出して」などと頼むか、`/dc-debug`・`/vmu-edit` を使います。
+VMU のセーブをツールで解析させるときは、MCP サーバーを 1 回だけ登録して Antigravity を再起動します。
+
+```powershell
+.\scripts\setup_agent_mcp.ps1            # ~/.gemini/antigravity/mcp_config.json に dc-vmu を追加（ほかの項目は残し、元の設定は .bak_<日時> に保存）
+.\scripts\setup_agent_mcp.ps1 -WhatIf    # 書き込まずに内容だけ表示
+.\scripts\setup_agent_mcp.ps1 -Remove    # 外す
+```
+
+**Claude Code**：このフォルダで開くと `.claude/skills` と `.mcp.json` の `dc-vmu` が使えます（初回にサーバーの利用許可を求められます）。
+
+- エージェントは skill の決まりに従い、実機に新しいプログラムを送る前と VMU に書き込む前（`dc_vmu.ps1 -Restore`）に確認を求めます。
+  自分が起動していない dc-tool-ip は止めません。
+- MCP の書き込み系ツールは、入力のイメージを上書きせず `third_party\vmu-workbench\.emu\work\` に新しいイメージを作ります。
+  実機に戻すのは `dc_vmu.ps1 -Restore` です。
+- Node.js が必要です。MCP と skill `vmu-save-analysis` は VMU Workbench から `sync_vmu_workbench.ps1` で取り込んだものです。
+
+### 12-2. VS Code の設定
 
 このフォルダを VS Code で開くと、`.vscode/` の設定がそのまま使えます。
 拡張機能 **C/C++（ms-vscode.cpptools）** を入れてください（開いたときに推奨が表示されます）。

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "dc-vmu": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["third_party/vmu-workbench/mcp/server.js"]
+    }
+  }
+}
