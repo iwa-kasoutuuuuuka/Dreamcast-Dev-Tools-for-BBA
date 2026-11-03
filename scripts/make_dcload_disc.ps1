@@ -48,8 +48,11 @@ if (-not (Test-Path $bin)) { throw "dcload-ip binary not found: $bin" }
 $disc = Join-Path $build 'disc'
 if (Test-Path $disc) { Remove-Item -Recurse -Force $disc }
 New-Item -ItemType Directory -Force $disc | Out-Null
-Write-Host '[2/4] Scrambling 1ST_READ.BIN'
-Invoke-Native $Tools.Scramble @($bin, (Join-Path $disc '1ST_READ.BIN'))
+# dcload-ip's build already scrambles 1st_read.bin (target-src/1st_read/Makefile runs
+# 'scramble loader.bin 1st_read.bin'), so copy it as-is. Scrambling it again makes a disc
+# that the BIOS cannot boot.
+Write-Host '[2/4] Copying 1ST_READ.BIN (already scrambled by the dcload-ip build)'
+Copy-Item $bin (Join-Path $disc '1ST_READ.BIN')
 
 # 3. IP.BIN (boot sector) from dcload-ip's own ip.txt
 Write-Host '[3/4] Building IP.BIN'
