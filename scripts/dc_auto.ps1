@@ -118,7 +118,15 @@ function Get-CrashReport([string]$logFile, [string]$elfFile) {
 }
 
 if ($Analyze) {
-    $r = Get-CrashReport (Resolve-Path $Analyze).Path $cfg.Elf
+    $logPath = (Resolve-Path $Analyze).Path
+    # a crashed run keeps a copy of its ELF next to the log: addresses only match that build
+    $keptElf = [System.IO.Path]::ChangeExtension($logPath, '.elf')
+    $elfForLog = $cfg.Elf
+    if (Test-Path $keptElf) { $elfForLog = $keptElf; Write-Host "[analyze] using the ELF kept with the log: $keptElf" }
+    elseif ($elfForLog -and (Test-Path $elfForLog) -and (Get-Item $elfForLog).LastWriteTime -gt (Get-Item $logPath).LastWriteTime) {
+        Write-Host "[analyze] warning: $elfForLog was rebuilt after this log; function names / lines may be wrong" -ForegroundColor Yellow
+    }
+    $r = Get-CrashReport $logPath $elfForLog
     if ($r) { $r } else { 'No crash output found in the log.' }
     return
 }
@@ -244,6 +252,8 @@ function Invoke-Run([string]$stamp) {
         if ($report) {
             $crashFile = [System.IO.Path]::ChangeExtension($log, '.crash.txt')
             $report | Set-Content -LiteralPath $crashFile -Encoding utf8
+            # keep the crashed build: -Analyze on this log later still resolves the right lines
+            Copy-Item -LiteralPath $elfPath -Destination ([System.IO.Path]::ChangeExtension($log, '.elf')) -ErrorAction SilentlyContinue
             $report | ForEach-Object { Write-Host $_ -ForegroundColor Red }
             Write-Host "[run] crash report: $crashFile"
         }

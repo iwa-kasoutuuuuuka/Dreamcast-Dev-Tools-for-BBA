@@ -1,4 +1,7 @@
-# GDmenu + BBA 自動デバッグ環境（H:\DC 用）
+# GDmenu + BBA 自動デバッグ環境
+
+> この文書のパス（`H:\DC\...`、`profiles\bleem2.ps1`）と IP（DC 192.168.10.2 / PC 192.168.10.1）は作者の環境の例です。
+> 自分のプロジェクトでは `profiles\` に同じ形のプリセットを作るか、`-Elf` / `-Build` / `-BuildDir` を指定してください。
 
 GDEMU の GDmenu から dcload-ip を起動しておけば、あとは PC 側で
 **ビルド → Dreamcast の準備待ち → 転送・実行 → ログ保存 → クラッシュ箇所の特定 → ソース変更で自動やり直し**
@@ -40,7 +43,8 @@ dc_auto.bat ─ build ─ ping 待ち ─ dc-tool-ip -x ─ logs\auto_*.txt ─ 
 - ログ：`logs\auto_日付_時刻.txt`（Dreamcast の printf / dbglog がすべて入る）
 - クラッシュ時（KOS の `Unhandled exception` / スタックトレース / `ASSERTION FAILURE` / `kernel panic`）は
   PC・PR・スタックの各アドレスを `sh-elf-addr2line` で関数名とソース行に変換し、
-  画面に赤字で表示して `logs\auto_….crash.txt` に保存します。
+  画面に赤字で表示して `logs\auto_….crash.txt` に保存します。クラッシュした回の ELF も `logs\auto_….elf` に残すので、
+  あとで `-Analyze` しても（その後に再ビルドしていても）正しい関数名・行になります。
 - `-Watch` 中にソースを保存すると再ビルドし、dcload-ip が待ち受けに戻った時点（プログラムが `exit()` した、
   またはリセットして GDmenu から 44 を選び直した）で新しい ELF を自動で送ります。
 - **bleem2 はリセット不要**：再ビルドが成功すると dc_auto が `logs\bleem2\reload.req` を作り、bleem2 はそれを 1 秒ごとに
