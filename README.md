@@ -19,6 +19,25 @@ CD-R を毎回焼く必要がなくなり、「ビルド → 数秒で実機起�
 | 処理時間の計測とグラフ | `dcdev_prof_begin/end()` → `prof_report.ps1 -Html` |
 | VS Code でビルド・実行・ブレークポイントデバッグ | `Ctrl+Shift+B` でビルド、`F5` で実機デバッグ |
 
+### 新機能：自動デバッグループ `dc_auto`（2026-11）
+
+GDEMU の GDmenu から dcload-ip を起動しておけば、あとは PC 側が全部回します。詳しくは [AUTO_DEBUG_ja.md](AUTO_DEBUG_ja.md)。
+
+| 機能 | 使い方 | 実機 |
+|---|---|---|
+| 保存 → ビルド → 転送・実行 → ログ保存、を自動で繰り返す | `dc_auto.bat -Preset <名前> -Watch` | 確認済み |
+| リセット不要の再送：再ビルド後に `reload.req` を作り、プログラムが自分で dcload に戻る | プリセットの `ReloadReq`（プログラム側で 1 秒ごとに確認） | 確認済み（bleem2） |
+| クラッシュ箇所の自動特定：KOS の例外表示を `sh-elf-addr2line` で関数名・ソース行に（`logs\auto_*.crash.txt`、その回の ELF も保存） | 自動。後から `-Analyze <log>` | 確認済み |
+| 実行中のプログラムを上書きしない：他の dc-tool-ip・実行中・再起動を見分けて待つ（ビルド中のリセットも検出） | 自動 | 確認済み（ビルド中の検出は未確認） |
+| 実機での回帰テスト：テストごとに起動・パッド入力・スクリーンショット → 基準画像と比較して `report.html` | `-Regress <tests.ps1> [-UpdateBaseline]` | 未確認（PC 上で確認） |
+| 実行ごとの後処理（例：性能の CSV / グラフ化） | プリセットの `PostRun` | 未確認（PC 上で確認） |
+| PC 側のネットワーク設定（固定 IP・ファイアウォール）を 1 回で | 管理者で `scripts\setup_pc_network.ps1`（`-Undo` で元に戻す） | 確認済み |
+
+プリセット（`profiles\*.ps1`）に ELF・ビルドコマンド・監視するフォルダなどを書きます。`profiles\hello_bba.ps1`（サンプル）と
+`profiles\bleem2.ps1`（PS1 エミュレーター bleem2 での実例：ディスクを `/pc/` から読む、デバッグファイルを PC に保存、回帰テスト）があります。
+
+> `/cd/` リダイレクト（`-i`）は KallistiOS 2.3 のプログラムでは動きません（[8 章](#8-cd-イメージを焼かずに使うcd-リダイレクト)）。
+
 ```
  ┌──────────── Windows PC ────────────┐            ┌──────── Dreamcast ────────┐
  │ DreamSDK (KallistiOS / sh-elf-gcc)  │            │  dcload-ip（起動ディスク）  │
@@ -90,6 +109,9 @@ CD-R を毎回焼く必要がなくなり、「ビルド → 数秒で実機起�
 ```
 Dreamcast-Dev-Tools-for-BBA/
 ├─ README.md                    このファイル
+├─ AUTO_DEBUG_ja.md             自動デバッグループ dc_auto の使い方
+├─ dc_auto.bat                  dc_auto をダブルクリックで（引数なし = bleem2 を -Watch で）
+├─ profiles/                    dc_auto のプリセット（hello_bba / bleem2 / bleem2_regress / bleem2_stats）
 ├─ .vscode/                     VS Code 設定（タスク、F5 デバッグ、IntelliSense）
 ├─ config/
 │   └─ bba.config.example.ps1   設定の雛形（bba.config.ps1 にコピーして使う）
@@ -97,6 +119,8 @@ Dreamcast-Dev-Tools-for-BBA/
 │   ├─ _common.ps1              共通設定（DreamSDK のパス、設定読み込み）
 │   ├─ make_dcload_disc.ps1     dcload-ip 起動ディスク(.cdi)を作る
 │   ├─ dc_run.ps1               .elf を転送して実行、コンソール/ファイルサーバー/ログ保存
+│   ├─ dc_auto.ps1              自動デバッグループ（ビルド・待機・実行・クラッシュ解析・-Watch・-Regress）
+│   ├─ setup_pc_network.ps1     PC の固定 IP とファイアウォール（管理者で 1 回）
 │   ├─ dc_gdb.ps1               GDB 付きで実行（dc-tool-ip + sh-elf-gdb）
 │   ├─ dc_reset.ps1             疎通確認(ping)とリセット
 │   ├─ dc_prepare_host.ps1      dcdev が書き込むフォルダを PC 側に作る
