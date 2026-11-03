@@ -59,6 +59,20 @@ dc_auto.bat ─ build ─ ping 待ち ─ dc-tool-ip -x ─ logs\auto_*.txt ─ 
   dcload の呼び出しを数秒しないプログラムはリセットと見分けられないので、長く黙るプログラムでは `-WaitReboot` を使わず、
   プログラム側から定期的に /pc/ や printf を使ってください（bleem2 は reload.req の確認がその役目を兼ねます）。
 
+## 性能の記録と回帰テスト（2026-11-03 追加、実機では未確認）
+
+- **性能の記録**：bleem2 プリセットでは、実行が終わるたびにログの HB 行（fps・emu・dma など 30 フレームごと）を
+  `logs\auto_….stats.csv` と `logs\auto_….stats.html`（グラフ）にします。手で作るときは
+  `profiles\bleem2_stats.ps1 logs\auto_….txt`。BBA 起動中の値は /pc/ 通信の分を含むので、BBA 同士で比べてください。
+- **回帰テスト**：`dc_auto.bat -Preset bleem2 -Regress profiles\bleem2_regress.ps1`
+  - テストごとに、起動するディスク（`BOOTDISC`）とパッドスクリプト（`BLEEMPAD`）を `logs\bleem2\` に置いて bleem2 を送ります。
+    パッドスクリプトの `SHOT` は `SHOTn.bmp`（PS1 の表示領域をフルカラー）を PC に保存し、`EXIT` で dcload に戻ります。
+  - 結果は `logs\regress\<日時>\<テスト名>\`。初回の画像が基準（`logs\regress\baseline\`）になり、2 回目からは比べて
+    `report.html` に基準・今回・差分（赤）を並べます。失敗・クラッシュ・時間切れがあると終了コード 1。
+  - 基準を作り直すときは `-UpdateBaseline`。時間切れになると reload.req で終了を頼み、20 秒たっても終わらなければ dc-tool-ip を閉じます。
+  - ゲームの画像は著作物なので、基準画像は `logs\`（git の対象外）に置いたままにしてください。
+- **ビルド中のリセット**：ping の監視をバックグラウンドで常に動かすようにしたので、ビルド中にリセットしても見逃しません。
+
 ## 電源を入れ直す必要があるとき
 
 - KOS が例外を捕まえた場合や `exit()` した場合は dcload-ip に戻るので、そのまま次を送れます。

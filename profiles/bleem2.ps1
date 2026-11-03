@@ -15,6 +15,7 @@ $preset_bleem = 'H:\DC\bleem2'
 $preset_disc = Join-Path (Split-Path -Parent $PSScriptRoot) 'build\bleem2_cd'
 # BBA_LOG_DIR in src/disc.h: debug files (BLEEMLOG, BLEEMWIN, SHOTn, ...) and reload.req
 $preset_logs = Join-Path (Split-Path -Parent $PSScriptRoot) 'logs\bleem2'
+$preset_stats = Join-Path $PSScriptRoot 'bleem2_stats.ps1'
 @{
     Elf      = Join-Path $preset_bleem 'bleem2.elf'
     BuildDir = $preset_bleem
@@ -34,5 +35,36 @@ $preset_logs = Join-Path (Split-Path -Parent $PSScriptRoot) 'logs\bleem2'
             $d = Join-Path $preset_disc "psbios\$b"
             if ((Test-Path $src) -and -not (Test-Path $d)) { Copy-Item $src $d }
         }
+        # left over from an interrupted -Regress run: would change what a normal run boots / presses
+        foreach ($f in 'BOOTDISC', 'BLEEMPAD') { Remove-Item -LiteralPath (Join-Path $preset_logs $f) -ErrorAction SilentlyContinue }
     }
+    # after every run: heartbeat lines -> <log>.stats.csv / .stats.html
+    PostRun  = { param($log) & $preset_stats $log }
+
+    # -Regress profiles\bleem2_regress.ps1: each test names a disc image and a pad script
+    # (src/padscript.c: SHOT writes SHOTn.bmp to logs\bleem2, EXIT returns to dcload)
+    RegressOutput = $preset_logs
+    RegressSetup  = {
+        param($test)
+        $name = 'METAL_SL.BIN'
+        if ($test.Disc) {
+            $name = Split-Path -Leaf $test.Disc
+            if (Test-Path $test.Disc) {     # a path on the PC: hard-link it (and a .cue's tracks) into the disc folder
+                $files = @(Get-Item $test.Disc)
+                if ($test.Disc -match '\.cue$') {
+                    $dir = Split-Path -Parent $test.Disc
+                    $files += Select-String -LiteralPath $test.Disc -Pattern 'FILE\s+"([^"]+)"' |
+                              ForEach-Object { Get-Item (Join-Path $dir $_.Matches[0].Groups[1].Value) }
+                }
+                foreach ($f in $files) {
+                    $dst = Join-Path $preset_disc $f.Name
+                    if (-not (Test-Path $dst)) { New-Item -ItemType HardLink -Path $dst -Target $f.FullName | Out-Null }
+                }
+            }
+        }
+        [System.IO.File]::WriteAllText((Join-Path $preset_logs 'BOOTDISC'), $name)
+        [System.IO.File]::WriteAllText((Join-Path $preset_logs 'BLEEMPAD'), (($test.Pad -replace "`r", '').Trim() + "`n"))
+        Write-Host "[regress] disc $name, pad script $(@($test.Pad -split "`n").Count) line(s)"
+    }
+    RegressCleanup = { foreach ($f in 'BOOTDISC', 'BLEEMPAD') { Remove-Item -LiteralPath (Join-Path $preset_logs $f) -ErrorAction SilentlyContinue } }
 }
