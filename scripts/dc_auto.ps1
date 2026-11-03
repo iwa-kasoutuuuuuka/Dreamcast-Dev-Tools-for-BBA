@@ -219,6 +219,7 @@ function Wait-Dcload($old) {
     while ($true) {
         $sawReboot = $script:mon.GapEnd -gt $since
         $oldAlive = ($old -and -not $old.HasExited) -or ($WaitReboot -and -not $old)
+        if ($script:needReset) { $since = $script:needReset; $oldAlive = $true }
         $others = @(Get-Process dc-tool-ip -ErrorAction SilentlyContinue | Where-Object { -not $old -or $_.Id -ne $old.Id })
         $up = Test-Dcload
         if ($up -and $others.Count -eq 0 -and (-not $oldAlive -or $sawReboot)) {
@@ -227,11 +228,13 @@ function Wait-Dcload($old) {
                 Stop-Process -Id $old.Id -Force -ErrorAction SilentlyContinue
                 $old.WaitForExit(3000) | Out-Null
             }
+            $script:needReset = $null
             if ($said) { Write-Host "[wait] dcload-ip is ready ($dcIp)" -ForegroundColor Green }
             Start-Sleep -Milliseconds 300
             return $true
         }
-        $msg = if ($others.Count -gt 0) { "Another dc-tool-ip is running (PID $($others.Id -join ', ')). Waiting for it to end..." }
+        $msg = if ($script:needReset -and $others.Count -eq 0) { 'Waiting for the reset: reset the Dreamcast and pick DCLOAD-IP in GDmenu...' }
+               elseif ($others.Count -gt 0) { "Another dc-tool-ip is running (PID $($others.Id -join ', ')). Waiting for it to end..." }
                elseif ($oldAlive) { 'A program is still running. Exit it, or reset and pick DCLOAD-IP in GDmenu...' }
                else { "No reply from $dcIp. Boot dcload-ip on the Dreamcast (GDmenu -> DCLOAD-IP BBA)..." }
         if ($msg -ne $said) { Write-Host "[wait] $msg" -ForegroundColor Yellow; $said = $msg }
@@ -243,7 +246,8 @@ function Wait-Dcload($old) {
 function Q([string]$s) { if ($s -match '[\s"]') { '"' + ($s -replace '"', '\"') + '"' } else { $s } }
 
 # Runs one upload and returns the run (Proc, Log, Elf, Result, Done). Result is 'exit' when
-# dc-tool-ip ended, 'changed' when sources changed meanwhile (-Watch), 'timeout' when TimeoutSec
+# dc-tool-ip ended, 'changed' when sources changed meanwhile (-Watch), 'noexec' when dcload took the ELF
+# but did not start it (a reset is needed), 'timeout' when TimeoutSec
 # passed (the program is asked to exit through ReloadReq first, then dc-tool-ip is closed).
 function Invoke-Run([string]$stamp, [int]$TimeoutSec = 0) {
     $elfPath = (Resolve-Path $cfg.Elf).Path
@@ -275,11 +279,25 @@ function Invoke-Run([string]$stamp, [int]$TimeoutSec = 0) {
     $fs = [System.IO.File]::Open($log, 'Open', 'Read', 'ReadWrite')
     $rd = New-Object System.IO.StreamReader($fs, (New-Object System.Text.UTF8Encoding($false)))
     $nextCheck = (Get-Date).AddSeconds(1)
-    $t0 = Get-Date; $asked = $null
+    $t0 = Get-Date; $asked = $null; $sent = $null; $started = $false
     try {
         while ($true) {
             $chunk = $rd.ReadToEnd()
-            if ($chunk) { [Console]::Write($chunk) }
+            if ($chunk) {
+                [Console]::Write($chunk)
+                if (-not $sent -and $chunk -match 'Transferred \d+ bytes') { $sent = Get-Date }
+                if ($chunk -match 'executing') { $started = $true }
+            }
+            # dcload took the ELF but never started it: the Dreamcast was not really idle in dcload
+            # (an old program still sat in a dcload call). Only a reset gets it back.
+            if ($sent -and -not $started -and -not $proc.HasExited -and ((Get-Date) - $sent).TotalSeconds -gt 15) {
+                Write-Host "`n[run] dcload-ip received the program but did not start it. Reset the Dreamcast and pick DCLOAD-IP in GDmenu;" -ForegroundColor Red
+                Write-Host '      the upload is repeated after the reset.' -ForegroundColor Red
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                $proc.WaitForExit(3000) | Out-Null
+                $script:needReset = Get-Date
+                $run.Result = 'noexec'; break
+            }
             if ($proc.HasExited) { $chunk = $rd.ReadToEnd(); if ($chunk) { [Console]::Write($chunk) }; break }
             if ($Watch -and (Get-Date) -gt $nextCheck) {
                 $nextCheck = (Get-Date).AddSeconds(1)
@@ -304,7 +322,7 @@ function Invoke-Run([string]$stamp, [int]$TimeoutSec = 0) {
         if ($run.Result -eq 'exit') { $run.Result = 'timeout' }
         Remove-Item -LiteralPath $cfg.ReloadReq -ErrorAction SilentlyContinue
     }
-    if ($run.Result -ne 'changed') { Complete-Run $run }
+    if ($run.Result -notin 'changed', 'noexec') { Complete-Run $run }
     return $run
 }
 
@@ -408,9 +426,11 @@ try {
             Write-Host "`n[regress] === $($t.Name) ===" -ForegroundColor Cyan
             Get-ChildItem $cfg.RegressOutput -Filter 'SHOT*.bmp' -ErrorAction SilentlyContinue | Remove-Item -Force
             & $cfg.RegressSetup $t | Out-Host
-            if (-not (Wait-Dcload $script:current)) { throw "dcload-ip was not ready within $WaitTimeout s" }
             $timeout = if ($t.Timeout) { [int]$t.Timeout } else { 180 }
-            $run = Invoke-Run '' -TimeoutSec $timeout
+            do {
+                if (-not (Wait-Dcload $script:current)) { throw "dcload-ip was not ready within $WaitTimeout s" }
+                $run = Invoke-Run '' -TimeoutSec $timeout
+            } while ($run.Result -eq 'noexec')
             $out = Join-Path $runDir $t.Name
             New-Item -ItemType Directory -Force $out | Out-Null
             Copy-Item -LiteralPath $run.Log -Destination (Join-Path $out 'console.txt')
@@ -479,6 +499,7 @@ try {
             if (-not (Wait-Dcload $script:current)) { throw "dcload-ip was not ready within $WaitTimeout s" }
             Complete-Run $script:lastRun          # a run left behind by -Watch (it has ended now)
             $r = (Invoke-Run $stamp).Result
+            if ($r -eq 'noexec') { continue }     # upload again after the reset
         } else { $r = 'exit' }
         if (-not $Watch) { break }
 
