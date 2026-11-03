@@ -13,14 +13,19 @@
 # cannot collide with dc_auto's own parameters and variables.
 $preset_bleem = 'H:\DC\bleem2'
 $preset_disc = Join-Path (Split-Path -Parent $PSScriptRoot) 'build\bleem2_cd'
+# BBA_LOG_DIR in src/disc.h: debug files (BLEEMLOG, BLEEMWIN, SHOTn, ...) and reload.req
+$preset_logs = Join-Path (Split-Path -Parent $PSScriptRoot) 'logs\bleem2'
 @{
     Elf      = Join-Path $preset_bleem 'bleem2.elf'
     BuildDir = $preset_bleem
     Build    = 'source /h/DC/KallistiOS/environ.sh && make'
     Watch    = @((Join-Path $preset_bleem 'src'), (Join-Path $preset_bleem 'Makefile'))
+    # -Watch: after a rebuild this file asks the running bleem2 to return to dcload (no reset needed)
+    ReloadReq = Join-Path $preset_logs 'reload.req'
     Prepare  = {
         $game = Join-Path $preset_bleem 'build\Metal Slug X (USA).bin'
         New-Item -ItemType Directory -Force (Join-Path $preset_disc 'psbios') | Out-Null
+        New-Item -ItemType Directory -Force $preset_logs | Out-Null
         # hard link: no 100 MB copy (same NTFS volume)
         $dst = Join-Path $preset_disc 'METAL_SL.BIN'
         if ((Test-Path $game) -and -not (Test-Path $dst)) { New-Item -ItemType HardLink -Path $dst -Target $game | Out-Null }

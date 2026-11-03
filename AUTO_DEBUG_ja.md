@@ -43,9 +43,17 @@ dc_auto.bat ─ build ─ ping 待ち ─ dc-tool-ip -x ─ logs\auto_*.txt ─ 
   画面に赤字で表示して `logs\auto_….crash.txt` に保存します。
 - `-Watch` 中にソースを保存すると再ビルドし、dcload-ip が待ち受けに戻った時点（プログラムが `exit()` した、
   またはリセットして GDmenu から 44 を選び直した）で新しい ELF を自動で送ります。
+- **bleem2 はリセット不要**：再ビルドが成功すると dc_auto が `logs\bleem2\reload.req` を作り、bleem2 はそれを 1 秒ごとに
+  見て自分から dcload に戻ります。そのまま新しい版が送られます（プリセットの `ReloadReq`）。
+  ほかにも dcload 起動時の bleem2 は次のとき dcload に戻ります：A+B+X+Y+Start、SH-4 例外（KOS と同じ書式で
+  レジスタを出すので crash.txt ができる）、30 秒フレームが進まないハング。ディスク起動では従来どおりその場で止まります。
+- dcload 起動時の bleem2 は、デバッグ用ファイル（BLEEMLOG / BLEEMWIN / BLEEMDSC / SHOTn など）を VMU ではなく
+  `logs\bleem2\` に書きます（VMU が一杯になる・書き込みで止まる問題の対策）。セーブデータは VMU のままです。
 - dcload-ip はプログラム実行中でも（/pc/ やコンソールの通信中に）ping に応答するため、ping だけでは「送ってよい」と判定しません。
   送るのは「ping が返る」かつ「この PC で他の dc-tool-ip が動いていない」かつ「前回の実行が終わった、
-  または再起動を検出した（2 秒以上 ping が途切れてから復帰）」ときだけです。実行中のプログラムを上書きしないためです。
+  または再起動を検出した（5 秒以上 ping が途切れてから復帰）」ときだけです。実行中のプログラムを上書きしないためです。
+  dcload の呼び出しを数秒しないプログラムはリセットと見分けられないので、長く黙るプログラムでは `-WaitReboot` を使わず、
+  プログラム側から定期的に /pc/ や printf を使ってください（bleem2 は reload.req の確認がその役目を兼ねます）。
 
 ## 電源を入れ直す必要があるとき
 
@@ -56,7 +64,8 @@ dc_auto.bat ─ build ─ ping 待ち ─ dc-tool-ip -x ─ logs\auto_*.txt ─ 
 
 - **実機で確認済み（2026-11-03）**：サンプル（コンソール・/pc/・コントローラー・VMU）と、
   bleem2 が `/pc/` のフォルダからメタルスラッグXを起動するところまで。
-  クラッシュ解析と `-Watch` の再実行は偽の dc-tool-ip でのみ確認（実機ではまだ）。
+  `-Watch` で保存 → 再ビルド → bleem2 が自分で dcload に戻る → 自動送信、もリセットなしで 2 回続けて確認済み。
+  クラッシュ解析は偽の dc-tool-ip でのみ確認（実機ではまだ）。
 - **`/cd/` リダイレクト（`-Iso` / `-CdDir`）は KallistiOS 2.3 では動きません。** dcload-ip 2.0.3 は GD-ROM コマンドに
   ハンドル 0 を返し（KOS はこれを失敗扱い）、DMA 読み込みにも対応していないため。ディスクのデータは `/pc/` で読む必要があります。
 - **bleem2 は dcload から起動すると PC のフォルダからディスクを読みます**（`src/disc.h` の `BBA_DISC_DIR`）。

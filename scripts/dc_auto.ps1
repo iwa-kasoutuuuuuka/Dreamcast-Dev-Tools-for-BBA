@@ -156,7 +156,10 @@ function Invoke-Build {
 # running program. So upload only when
 #   - no other dc-tool-ip is running on this PC (someone else's session owns the Dreamcast), and
 #   - our previous dc-tool-ip has ended (the program exited / crashed back to dcload), or the
-#     Dreamcast was seen rebooting (no ping for 2+ s, then ping again: reset -> GDmenu -> dcload).
+#     Dreamcast was seen rebooting (no ping for 5+ s, then ping again: reset -> GDmenu -> dcload).
+#     A running program answers ping only while it is inside a dcload call, so a program that makes
+#     no dcload call for a few seconds looks like a reset. bleem2 polls its reload request once a
+#     second to stay visible; the 5 s also covers programs that print now and then.
 function Wait-Dcload($old) {
     $t0 = Get-Date; $downSince = $null; $sawReboot = $false; $said = ''
     while ($true) {
@@ -165,7 +168,7 @@ function Wait-Dcload($old) {
         $up = Test-Dcload
         if (-not $up) { if (-not $downSince) { $downSince = Get-Date } }
         else {
-            if ($downSince -and ((Get-Date) - $downSince).TotalSeconds -ge 2) { $sawReboot = $true }
+            if ($downSince -and ((Get-Date) - $downSince).TotalSeconds -ge 5) { $sawReboot = $true }
             $downSince = $null
         }
         if ($up -and $others.Count -eq 0 -and (-not $oldAlive -or $sawReboot)) {
@@ -199,6 +202,7 @@ function Invoke-Run([string]$stamp) {
     $logDir = Join-Path $DevkitRoot 'logs'
     New-Item -ItemType Directory -Force $logDir | Out-Null
     $log = Join-Path $logDir ('auto_' + (Get-Date -Format 'yyyyMMdd_HHmmss') + '.txt')
+    if ($cfg.ReloadReq) { Remove-Item -LiteralPath $cfg.ReloadReq -ErrorAction SilentlyContinue }
     $errLog = "$log.stderr"
     $root = Split-Path -Parent $elfPath
     Write-Host "`n[run] dc-tool-ip $($dcArgs -join ' ')" -ForegroundColor Cyan
@@ -281,6 +285,11 @@ try {
         Start-Sleep -Milliseconds 400     # let the editor finish writing
         $stamp = Get-SourceStamp
         $built = Invoke-Build
+        # the program still runs: ask it to return to dcload (presets with ReloadReq, e.g. bleem2)
+        if ($built -and $r -eq 'changed' -and $cfg.ReloadReq -and $script:current -and -not $script:current.HasExited) {
+            New-Item -ItemType File -Force -Path $cfg.ReloadReq | Out-Null
+            Write-Host "[watch] asked the program to return to dcload ($($cfg.ReloadReq))" -ForegroundColor Yellow
+        }
     }
 } finally {
     if ($script:current -and -not $script:current.HasExited) { Stop-Process -Id $script:current.Id -Force -ErrorAction SilentlyContinue }
