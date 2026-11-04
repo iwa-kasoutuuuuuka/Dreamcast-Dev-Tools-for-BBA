@@ -250,6 +250,12 @@ function Q([string]$s) { if ($s -match '[\s"]') { '"' + ($s -replace '"', '\"') 
 # but did not start it (a reset is needed), 'timeout' when TimeoutSec
 # passed (the program is asked to exit through ReloadReq first, then dc-tool-ip is closed).
 function Invoke-Run([string]$stamp, [int]$TimeoutSec = 0) {
+    # The ELF can vanish while we wait for the Dreamcast (a clean, or sync_vmu_workbench.ps1
+    # re-copying third_party): build it again instead of failing after the wait.
+    if (-not (Test-Path $cfg.Elf)) {
+        Write-Host "[run] $($cfg.Elf) is gone (deleted while waiting?). Building it again." -ForegroundColor Yellow
+        if (-not (Invoke-Build) -or -not (Test-Path $cfg.Elf)) { throw "the ELF is missing and could not be built: $($cfg.Elf)" }
+    }
     $elfPath = (Resolve-Path $cfg.Elf).Path
     $dcArgs = @('-q', '-t', $dcIp)
     if ($Fast) { $dcArgs += '-f' }
