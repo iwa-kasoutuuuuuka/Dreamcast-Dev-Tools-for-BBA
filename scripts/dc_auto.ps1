@@ -308,7 +308,7 @@ function Wait-Dcload($old) {
             Start-Sleep -Milliseconds 300
             return $true
         }
-        $msg = if ($script:needReset -and $others.Count -eq 0) { 'Waiting for the reset: reset the Dreamcast and pick DCLOAD-IP in GDmenu...' }
+        $msg = if ($script:needReset -and $others.Count -eq 0) { 'Waiting for the reset: turn the Dreamcast off, wait 5 s, turn it on and pick DCLOAD-IP in GDmenu...' }
                elseif ($others.Count -gt 0) { "Another dc-tool-ip is running (PID $($others.Id -join ', ')). Waiting for it to end..." }
                elseif ($oldAlive) { 'A program is still running. Exit it, or reset and pick DCLOAD-IP in GDmenu...' }
                else { "No reply from $dcIp. Boot dcload-ip on the Dreamcast (GDmenu -> DCLOAD-IP BBA)..." }
@@ -318,7 +318,7 @@ function Wait-Dcload($old) {
             Write-Host "[wait] $msg" -ForegroundColor Yellow; $said = $msg
             $otherPids = @($others | ForEach-Object { $_.Id })
             $detail = switch ($reason) {
-                'reset'            { 'reset the Dreamcast, pick DCLOAD-IP' }
+                'reset'            { 'power the Dreamcast off/on, pick DCLOAD-IP' }
                 'other-dc-tool-ip' { "another dc-tool-ip (PID $($otherPids -join ', '))" }
                 'program-running'  { 'a program is still running' }
                 default            { "no reply from $dcIp" }
@@ -334,7 +334,7 @@ function Wait-Dcload($old) {
                 Send-Toast "dc_auto is waiting: $script:elfName" ("Another dc-tool-ip is running (PID $(@($others | ForEach-Object { $_.Id }) -join ', ')). " +
                     "$script:elfName is sent to $dcIp when it ends.")
             } elseif ($reason -eq 'reset') {
-                Send-Toast "dc_auto is waiting: $script:elfName" 'Reset the Dreamcast and pick DCLOAD-IP in GDmenu; the upload is repeated after the reset.'
+                Send-Toast "dc_auto is waiting: $script:elfName" 'Turn the Dreamcast off, wait 5 s, turn it on and pick DCLOAD-IP in GDmenu (a controller reset does not help when the old program is stuck). The upload is repeated after that.'
             } else {
                 Send-Toast "dc_auto is waiting: $script:elfName" "No reply from dcload-ip at $dcIp. Boot DCLOAD-IP BBA in GDmenu."
             }
@@ -407,8 +407,9 @@ function Invoke-Run([string]$stamp, [int]$TimeoutSec = 0) {
             # dcload took the ELF but never started it: the Dreamcast was not really idle in dcload
             # (an old program still sat in a dcload call). Only a reset gets it back.
             if ($sent -and -not $started -and -not $proc.HasExited -and ((Get-Date) - $sent).TotalSeconds -gt 15) {
-                Write-Host "`n[run] dcload-ip received the program but did not start it. Reset the Dreamcast and pick DCLOAD-IP in GDmenu;" -ForegroundColor Red
-                Write-Host '      the upload is repeated after the reset.' -ForegroundColor Red
+                Write-Host "`n[run] dcload-ip received the program but did not start it: an earlier program is stuck in a dcload call" -ForegroundColor Red
+                Write-Host '      (e.g. its dc-tool-ip was closed while it ran). Turn the Dreamcast off, wait 5 s, turn it on and pick' -ForegroundColor Red
+                Write-Host '      DCLOAD-IP in GDmenu (a controller reset does not help here); the upload is repeated after that.' -ForegroundColor Red
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
                 $proc.WaitForExit(3000) | Out-Null
                 $script:needReset = Get-Date
