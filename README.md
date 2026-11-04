@@ -31,6 +31,7 @@ GDEMU の GDmenu から dcload-ip を起動しておけば、あとは PC 側が
 | 実行中のプログラムを上書きしない：他の dc-tool-ip・実行中・再起動を見分けて待つ（ビルド中のリセットも検出）。送ったのに始まらなければリセットを頼んで送り直す。待っている間に ELF が消えたら（`sync_vmu_workbench.ps1` など）ビルドし直してから送る | 自動 | 確認済み（ビルド中の検出は未確認） |
 | 実機での回帰テスト：テストごとに起動・パッド入力・スクリーンショット → 基準画像と比較して `report.html` | `-Regress <tests.ps1> [-UpdateBaseline]` | 確認済み（bleem2、基準と比較して差 0.00%） |
 | 実行ごとの後処理（例：性能の CSV / グラフ化） | プリセットの `PostRun` | 確認済み（bleem2） |
+| 待っている・送った・終わったを Windows の通知で知らせる。待っている間はウィンドウのタイトルに理由、状態は `logs\dc_auto_status.txt` | 自動（`-NoNotify` で通知なし） | 確認済み（2026-11-04、実機の「リセットしてください」の通知も） |
 | PC 側のネットワーク設定（固定 IP・ファイアウォール）を 1 回で | 管理者で `scripts\setup_pc_network.ps1`（`-Undo` で元に戻す） | 確認済み |
 
 プリセット（`profiles\*.ps1`）に ELF・ビルドコマンド・監視するフォルダなどを書きます。`profiles\hello_bba.ps1`（サンプル）と
@@ -46,8 +47,8 @@ GDEMU の GDmenu から dcload-ip を起動しておけば、あとは PC 側が
 | 機能 | 使い方 | 実機 |
 |---|---|---|
 | VMU を丸ごと（128KB、ミニゲーム・コピー禁止のファイルも）PC に吸い出す | `scripts\dc_vmu.ps1 -Dump` | 確認済み（2026-11-03、PC との読み書きは 4KB ずつ） |
-| イメージを VMU に書き戻す（先に今の中身を控えとして吸い出し、全ブロックを読み直して確認） | `dc_vmu.ps1 -Restore <img>` | 確認済み（2026-11-03、同じ内容を書き戻して全ブロックの読み直しが一致） |
-| bleem2 の PS1 メモリーカード（`BLEEMMC`）を `.mcr` で出し入れ（MemcardRex などで編集） | `dc_vmu.ps1 -ExportPs1 card.mcr` / `-ImportPs1 card.mcr` | 確認済み（2026-11-04、テスト用セーブを入れたカードを実機の VMU に書き、吸い出して一致） |
+| イメージを VMU に書き戻す（先に今の中身を控えとして吸い出し、今の中身と違うブロックだけを書いて読み直して確認） | `dc_vmu.ps1 -Restore <img>` | 確認済み（2026-11-04、同じ内容は 0 ブロック、PS1 カードを入れ替えると 2 ブロックだけ書き、元に戻して一致） |
+| bleem2 の PS1 メモリーカード（`BLEEMMC`）を `.mcr` で出し入れ（MemcardRex などで編集。VMU に入らないカードは書く前に止める） | `dc_vmu.ps1 -ExportPs1 card.mcr` / `-ImportPs1 card.mcr` | 確認済み（2026-11-04、テスト用セーブを入れたカードを実機の VMU に書き、吸い出して一致） |
 | セーブの一覧・HEX / アイコン / 名前付きの値の編集（ブラウザの GUI） | `dc_vmu.ps1 -List` / `-Gui` | PC 上で確認 |
 
 ### 新機能：AI エージェント（Antigravity / Claude Code）対応（2026-11）
@@ -59,7 +60,8 @@ GDEMU の GDmenu から dcload-ip を起動しておけば、あとは PC 側が
 | skill `dreamcast-bba-debug`（dc_auto / dc_vmu の使い方と、実機を壊さないための決まり） | `.agent/skills/` | `.claude/skills/` |
 | skill `vmu-save-analysis`（VMU Workbench のセーブ解析の手順） | `.agent/skills/` | `.claude/skills/` |
 | ルール（実機に送る前・VMU に書く前は利用者に確認、など） | `.agent/rules/` | skill の中に同じ内容 |
-| ワークフロー `/dc-debug`・`/vmu-edit` | `.agent/workflows/` | — |
+| skill `dc-debug`（ビルド → 実行 → ログ・クラッシュ → 修正 → 再実行） | `.agent/skills/` | `.claude/skills/` |
+| skill `vmu-edit`（VMU の吸い出し → 編集 → 確認 → 書き戻し） | `.agent/skills/` | `.claude/skills/` |
 | MCP サーバー `dc-vmu`（VMU Workbench のツール 19 個：一覧・差分・値探し・書き換えなど） | `scripts\setup_agent_mcp.ps1` で登録 | `.mcp.json`（登録済み） |
 
 ```
@@ -160,7 +162,7 @@ Dreamcast-Dev-Tools-for-BBA/
 ├─ gdb/
 │   └─ dreamcast.gdbinit        GDB 設定（SH4、タイムアウト等）
 ├─ third_party/vmu-workbench/   VMU Workbench（MIT）の写し。VMU エディタ（CLI・GUI・MCP サーバー）と転送プログラム emu/vmutransfer
-├─ .agent/                      Antigravity 用の skill・ルール・ワークフロー
+├─ .agent/                      Antigravity 用の skill・ルール
 ├─ .claude/skills/              Claude Code 用の skill（.agent/skills と同じ内容）
 ├─ .mcp.json                    Claude Code 用の MCP 設定（dc-vmu）
 └─ sample/hello_bba/            動作確認用サンプル（全機能を使う）
@@ -683,14 +685,16 @@ dcdev を組み込まなくても使えます。GDmenu から dcload-ip を起�
 
 ### 12-1. AI エージェント（Antigravity / Claude Code）で使う
 
-**Antigravity**：このリポジトリのフォルダをワークスペースとして開くと、`.agent/skills`・`.agent/rules`・`.agent/workflows` が読まれます。
-「実機で動かしてログを見て」「VMU を吸い出して」などと頼むか、`/dc-debug`・`/vmu-edit` を使います。
+**Antigravity**：このリポジトリのフォルダをワークスペースとして開くと、`.agent/skills`・`.agent/rules` が読まれます。
+「実機で動かしてログを見て」「VMU を吸い出して」などと頼むと、skill `dc-debug`・`vmu-edit` の手順で進めます
+（以前のワークフロー `/dc-debug`・`/vmu-edit` は skill に変えました。Claude Code では `/dc-debug`・`/vmu-edit` で呼べます）。
 VMU のセーブをツールで解析させるときは、MCP サーバーを 1 回だけ登録して Antigravity を再起動します。
 
 ```powershell
 .\scripts\setup_agent_mcp.ps1            # ~/.gemini/config/mcp_config.json（と、あれば Antigravity IDE の ~/.gemini/antigravity-ide/mcp_config.json）に dc-vmu を追加。ほかの項目は残し、元の設定は .bak_<日時> に保存
 .\scripts\setup_agent_mcp.ps1 -WhatIf    # 書き込まずに内容だけ表示
 .\scripts\setup_agent_mcp.ps1 -Remove    # 外す
+.\scripts\setup_agent_mcp.ps1 -Check     # 何も書かずに確認：登録・サーバーの応答（ツール数）・Antigravity が読み込んだか
 ```
 
 登録は開発用 PC で確認済み（2026-11-04）：Antigravity を起動するとサーバーが起動し、ツール 19 個が `~/.gemini/antigravity/mcp/dc-vmu/` に読み込まれる。

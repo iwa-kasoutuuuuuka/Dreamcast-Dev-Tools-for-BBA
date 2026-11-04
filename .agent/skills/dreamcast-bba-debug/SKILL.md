@@ -7,6 +7,7 @@ description: Dreamcast 実機を BBA (ブロードバンドアダプタ) と dcl
 
 このリポジトリ (Dreamcast-Dev-Tools-for-BBA) のスクリプトで、PC から実機を操作する。詳しい説明は `README.md` と
 `AUTO_DEBUG_ja.md`。VMU のセーブの中身を解析するときは skill `vmu-save-analysis` も使う。
+ビルド → 実行 → ログ確認の流れは skill `dc-debug`、VMU の吸い出し → 編集 → 書き戻しの流れは skill `vmu-edit` にまとめてある。
 
 ## 守ること (実機と利用者のものを壊さない)
 

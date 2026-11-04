@@ -1,6 +1,7 @@
 # Dreamcast-Dev-Tools-for-BBA のルール
 
 - 実機の操作は skill `dreamcast-bba-debug`、VMU セーブの解析は skill `vmu-save-analysis` の手順に従う。
+  実機でビルド・実行・ログ確認を回すときは skill `dc-debug`、VMU を吸い出して編集・書き戻すときは skill `vmu-edit` の順番で進める。
 - 実機に新しいプログラムを送る前と、VMU に書き込む前 (`scripts\dc_vmu.ps1 -Restore`) は、利用者の了承を得る。
 - 自分が起動していない dc-tool-ip は止めない。SD カード・PC のネットワーク設定は利用者が変える。
 - `third_party\vmu-workbench\` は VMU Workbench の写し。直接編集せず、元のリポジトリを直して `scripts\sync_vmu_workbench.ps1` で取り込む。

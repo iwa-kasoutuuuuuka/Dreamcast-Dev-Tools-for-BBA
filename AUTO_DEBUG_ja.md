@@ -77,6 +77,9 @@ dc_auto.bat ─ build ─ ping 待ち ─ dc-tool-ip -x ─ logs\auto_*.txt ─ 
   「リセットしてください」と表示し、リセットを検出してから自動で送り直します。
 - **待っている間に ELF が消えたとき**：別の dc-tool-ip の終わりを待つ間に ELF が消えると（`sync_vmu_workbench.ps1` で
   `third_party` を取り込み直したときなど）、送る直前にビルドし直します（2026-11-04 に実機で確認）。
+- **待っていることを知らせる**：別の dc-tool-ip の終わりや dcload の応答を待ち始めたとき、待ったあとに送ったとき、
+  長い実行が終わったときに Windows の通知を出します（`-NoNotify` で止める）。待っている間はウィンドウのタイトルに理由が出て、
+  `logs\dc_auto_status.txt` に状態（state・reason・elf・waiting_for_pid など）を書くので、エージェントや別のスクリプトからも分かります。
 
 ## 電源を入れ直す必要があるとき
 

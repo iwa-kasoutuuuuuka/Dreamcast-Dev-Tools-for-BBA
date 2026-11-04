@@ -1,6 +1,9 @@
 ---
-description: Dreamcast 実機でビルド → 実行 → ログとクラッシュの確認を回す (dc_auto)
+name: dc-debug
+description: Dreamcast 実機でビルド → 実行 → ログとクラッシュの確認 → 修正 → 再実行を回す手順 (dc_auto.ps1)。「実機で動かしてログを見て」「実機でクラッシュした原因を調べて直して」「保存するたびに実機で回して」など、プログラムを実機で 1 回 (または -Watch で繰り返し) 実行して結果を確かめるときに使う。
 ---
+
+# 実機でビルド → 実行 → ログとクラッシュの確認 (dc_auto)
 
 skill `dreamcast-bba-debug` に従う。
 

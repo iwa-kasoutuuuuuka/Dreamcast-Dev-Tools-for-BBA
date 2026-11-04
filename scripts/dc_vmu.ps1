@@ -35,6 +35,7 @@ param(
     [ValidatePattern('^[a-dA-D][12]$')] [string]$Slot = 'a1',
     [string]$Ip,
     [int]$WaitTimeout = 0,
+    [switch]$NoNotify,               # passed to dc_auto.ps1: no toast notifications
     [switch]$Yes
 )
 $ErrorActionPreference = 'Stop'
@@ -69,6 +70,7 @@ function Invoke-Transfer([string]$command) {
     Set-Content -LiteralPath (Join-Path $vmuDir 'vmu_cmd') -Value $command -Encoding ascii -NoNewline
     $a = @{ Elf = (Join-Path $romDir 'vmutransfer.elf'); BuildDir = $romDir; Build = "make VMU_PC_DIR=$pcDir"; WaitTimeout = $WaitTimeout }
     if ($Ip) { $a.Ip = $Ip }
+    if ($NoNotify) { $a.NoNotify = $true }
     & (Join-Path $PSScriptRoot 'dc_auto.ps1') @a
     Remove-Item -LiteralPath (Join-Path $vmuDir 'vmu_cmd') -ErrorAction SilentlyContinue
     $res = Join-Path $vmuDir 'vmu_result.txt'
@@ -121,7 +123,9 @@ elseif ($ImportPs1) {
     $img = if ($Image) { (Resolve-Path $Image).Path } else { Get-NewestDump }
     $out = [System.IO.Path]::ChangeExtension($img, $null).TrimEnd('.') + '_ps1.bin'
     Copy-Item -LiteralPath $img -Destination $out -Force
-    Invoke-Wb @('ps1-import', $out, $Name, $ImportPs1)
+    # a failed import (e.g. the card does not fit) must not leave a *_ps1.bin that looks like the new card
+    try { Invoke-Wb @('ps1-import', $out, $Name, $ImportPs1) }
+    catch { Remove-Item -LiteralPath $out -ErrorAction SilentlyContinue; throw }
     Invoke-Wb @('check', $out)
     Write-Host "[vmu] new image: $out   (write it to the VMU: .\dc_vmu.ps1 -Restore `"$out`")" -ForegroundColor Green
 }

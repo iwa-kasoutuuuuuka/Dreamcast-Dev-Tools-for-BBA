@@ -33,6 +33,13 @@
   compared with logs\regress\baseline\<name>\ (the first run becomes the baseline). report.html
   shows baseline / now / difference; the exit code is 1 when a test failed, crashed or timed out.
 
+  While it waits or runs, the console window title shows the state, and logs\dc_auto_status.txt
+  (key=value lines: state, reason, since, elf, waiting_for_pid, pid of this dc_auto, ...) tells other
+  scripts / agents that a job is queued; it is marked state=idle at the end. Windows toast
+  notifications (best effort, -NoNotify turns them off) say when the wait starts because another
+  dc-tool-ip runs or dcload-ip does not answer / a reset is needed, when the upload starts after a
+  wait, and how the run ended (only after a wait or a run longer than 20 s).
+
 .EXAMPLE
   .\dc_auto.ps1 -Preset hello_bba -Watch
   .\dc_auto.ps1 -Preset bleem2 -Watch
@@ -58,7 +65,8 @@ param(
     [switch]$WaitReboot,     # first upload only after the Dreamcast was seen rebooting (a program is stuck now)
     [string]$Analyze,
     [string]$Regress,        # test list (.ps1): run each test, collect screenshots, compare with the baseline
-    [switch]$UpdateBaseline  # with -Regress: take this run's screenshots as the new baseline
+    [switch]$UpdateBaseline, # with -Regress: take this run's screenshots as the new baseline
+    [switch]$NoNotify        # no Windows toast notifications (waiting / upload after a wait / run ended)
 )
 . "$PSScriptRoot\_common.ps1"
 
@@ -153,6 +161,68 @@ $pinger = New-Object System.Net.NetworkInformation.Ping
 
 function Test-Dcload { try { return $pinger.Send($dcIp, 400).Status -eq 'Success' } catch { return $false } }
 
+# ---------------------------------------------------------------- notifications / window title / status file
+# All best effort: none of this may break a run.
+$script:elfName = Split-Path -Leaf $cfg.Elf
+$script:statusFile = Join-Path $DevkitRoot 'logs\dc_auto_status.txt'
+$script:dcState = @{ State = ''; Detail = '' }
+$script:oldTitle = $null
+try { $script:oldTitle = $Host.UI.RawUI.WindowTitle } catch { }
+$script:notifier = $null
+$script:lastWaited = $null      # how long the last Wait-Dcload waited (TimeSpan) when it really waited
+
+# Windows toast through the WinRT API of Windows PowerShell 5.1, shown as "Windows PowerShell"
+# (its AppUserModelID is registered by Windows, so no app registration is needed). One tag per
+# dc_auto process: a newer toast replaces the older one in the notification center.
+function Send-Toast([string]$title, [string]$text) {
+    if ($NoNotify) { return }
+    try {
+        if (-not $script:notifier) {
+            $null = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
+            $null = [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]
+            $script:notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier(
+                '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe')
+        }
+        $e = { param($s) [System.Security.SecurityElement]::Escape([string]$s) }
+        $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+        $xml.LoadXml("<toast><visual><binding template=`"ToastGeneric`"><text>$(& $e $title)</text><text>$(& $e $text)</text></binding></visual></toast>")
+        $toast = New-Object Windows.UI.Notifications.ToastNotification $xml
+        $toast.Tag = "dc_auto_$PID"; $toast.Group = 'dc_auto'
+        $script:notifier.Show($toast)
+    } catch { $script:NoNotify = $true }     # not available here (pwsh 7, no WinRT, ...): stop trying
+}
+
+function Format-Span([TimeSpan]$t) { if ($t.TotalMinutes -ge 1) { '{0}m{1:00}s' -f [int][math]::Floor($t.TotalMinutes), $t.Seconds } else { '{0}s' -f [int]$t.TotalSeconds } }
+
+# State for the window title and logs\dc_auto_status.txt: building / waiting / running / watching / idle.
+function Set-DcState([string]$state, [string]$detail = '', [string]$reason = '', [int[]]$waitPid = @(), [hashtable]$extra = @{}) {
+    if ($state -eq $script:dcState.State -and $detail -eq $script:dcState.Detail) { return }
+    $script:dcState = @{ State = $state; Detail = $detail; Since = (Get-Date) }
+    try {
+        if ($state -eq 'idle') { if ($null -ne $script:oldTitle) { $Host.UI.RawUI.WindowTitle = $script:oldTitle } }
+        else { $Host.UI.RawUI.WindowTitle = "[$state] dc_auto: $script:elfName$(if ($detail) { " - $detail" })" }
+    } catch { }
+    try {
+        $f = $script:statusFile
+        # several dc_auto may share the file: only the one that wrote it last marks it idle
+        if ($state -eq 'idle' -and (Test-Path -LiteralPath $f) -and
+            -not (Select-String -LiteralPath $f -Pattern "^pid=$PID$" -Quiet)) { return }
+        $lines = @(
+            "state=$state"
+            "reason=$reason"
+            "detail=$detail"
+            "since=$(Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')"
+            "elf=$($cfg.Elf)"
+            "ip=$dcIp"
+            "waiting_for_pid=$($waitPid -join ',')"
+            "pid=$PID"
+        )
+        foreach ($k in $extra.Keys) { $lines += "$k=$($extra[$k])" }
+        New-Item -ItemType Directory -Force (Split-Path -Parent $f) | Out-Null
+        [System.IO.File]::WriteAllText($f, (($lines -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+    } catch { }
+}
+
 function Get-SourceStamp {
     if (-not $cfg.Watch) { return '' }
     $files = foreach ($w in $cfg.Watch) {
@@ -166,6 +236,7 @@ function Get-SourceStamp {
 function Invoke-Build {
     if ($NoBuild -or -not $cfg.Build) { return $true }
     Write-Host "`n[build] $($cfg.Build)   ($($cfg.BuildDir))" -ForegroundColor Cyan
+    Set-DcState 'building'
     try {
         # a scriptblock (preset) runs in PowerShell, a string runs in the DreamSDK shell
         if ($cfg.Build -is [scriptblock]) { & $cfg.Build } else { Invoke-DreamSdkBash $cfg.Build $cfg.BuildDir }
@@ -215,6 +286,8 @@ function Stop-ResetMonitor {
 
 function Wait-Dcload($old) {
     $t0 = Get-Date; $said = ''
+    $script:lastWaited = $null
+    $toasted = @{}; $reasonSince = $null; $lastReason = ''    # one toast per kind of wait, per call
     $since = if ($old) { $old.StartTime } else { $script:startTime }
     while ($true) {
         $sawReboot = $script:mon.GapEnd -gt $since
@@ -230,6 +303,8 @@ function Wait-Dcload($old) {
             }
             $script:needReset = $null
             if ($said) { Write-Host "[wait] dcload-ip is ready ($dcIp)" -ForegroundColor Green }
+            $waited = (Get-Date) - $t0
+            if ($said -and $waited.TotalSeconds -ge 2) { $script:lastWaited = $waited }
             Start-Sleep -Milliseconds 300
             return $true
         }
@@ -237,8 +312,38 @@ function Wait-Dcload($old) {
                elseif ($others.Count -gt 0) { "Another dc-tool-ip is running (PID $($others.Id -join ', ')). Waiting for it to end..." }
                elseif ($oldAlive) { 'A program is still running. Exit it, or reset and pick DCLOAD-IP in GDmenu...' }
                else { "No reply from $dcIp. Boot dcload-ip on the Dreamcast (GDmenu -> DCLOAD-IP BBA)..." }
-        if ($msg -ne $said) { Write-Host "[wait] $msg" -ForegroundColor Yellow; $said = $msg }
-        if ($WaitTimeout -gt 0 -and ((Get-Date) - $t0).TotalSeconds -gt $WaitTimeout) { return $false }
+        $reason = if ($script:needReset -and $others.Count -eq 0) { 'reset' } elseif ($others.Count -gt 0) { 'other-dc-tool-ip' }
+                  elseif ($oldAlive) { 'program-running' } else { 'no-dcload' }
+        if ($msg -ne $said) {
+            Write-Host "[wait] $msg" -ForegroundColor Yellow; $said = $msg
+            $otherPids = @($others | ForEach-Object { $_.Id })
+            $detail = switch ($reason) {
+                'reset'            { 'reset the Dreamcast, pick DCLOAD-IP' }
+                'other-dc-tool-ip' { "another dc-tool-ip (PID $($otherPids -join ', '))" }
+                'program-running'  { 'a program is still running' }
+                default            { "no reply from $dcIp" }
+            }
+            Set-DcState 'waiting' $detail $reason $otherPids
+        }
+        if ($reason -ne $lastReason) { $lastReason = $reason; $reasonSince = Get-Date }
+        # toast once the reason has lasted 2 s (a short ping glitch or a dc-tool-ip about to end stays quiet)
+        $kind = switch ($reason) { 'other-dc-tool-ip' { 'other' } 'reset' { 'dcload' } 'no-dcload' { 'dcload' } default { '' } }
+        if ($kind -and -not $toasted[$kind] -and ((Get-Date) - $reasonSince).TotalSeconds -ge 2) {
+            $toasted[$kind] = $true
+            if ($kind -eq 'other') {
+                Send-Toast "dc_auto is waiting: $script:elfName" ("Another dc-tool-ip is running (PID $(@($others | ForEach-Object { $_.Id }) -join ', ')). " +
+                    "$script:elfName is sent to $dcIp when it ends.")
+            } elseif ($reason -eq 'reset') {
+                Send-Toast "dc_auto is waiting: $script:elfName" 'Reset the Dreamcast and pick DCLOAD-IP in GDmenu; the upload is repeated after the reset.'
+            } else {
+                Send-Toast "dc_auto is waiting: $script:elfName" "No reply from dcload-ip at $dcIp. Boot DCLOAD-IP BBA in GDmenu."
+            }
+        }
+        if ($WaitTimeout -gt 0 -and ((Get-Date) - $t0).TotalSeconds -gt $WaitTimeout) {
+            $script:lastResult = 'wait-timeout'
+            if (((Get-Date) - $t0).TotalSeconds -ge 2) { Send-Toast "dc_auto gave up: $script:elfName" "dcload-ip was not ready within $WaitTimeout s ($said)" }
+            return $false
+        }
         Start-Sleep -Milliseconds 600
     }
 }
@@ -277,8 +382,13 @@ function Invoke-Run([string]$stamp, [int]$TimeoutSec = 0) {
         -RedirectStandardOutput $log -RedirectStandardError "$log.stderr"
     $null = $proc.Handle      # PowerShell 5.1 only keeps ExitCode if the handle was opened
     $script:current = $proc
-    $run = @{ Proc = $proc; Log = $log; Elf = $elfPath; Result = 'exit'; Done = $false }
+    $run = @{ Proc = $proc; Log = $log; Elf = $elfPath; Result = 'exit'; Done = $false; Start = (Get-Date); Waited = $script:lastWaited }
     $script:lastRun = $run
+    Set-DcState 'running' "dc-tool-ip PID $($proc.Id)" '' @() @{ log = $log; dc_tool_ip_pid = $proc.Id }
+    if ($script:lastWaited) {
+        Send-Toast "dc_auto: sending $script:elfName" "dcload-ip is ready after waiting $(Format-Span $script:lastWaited). Upload to $dcIp started."
+        $script:lastWaited = $null    # a repeated upload (noexec) toasts only after its own wait
+    }
 
     # tail the log while dc-tool-ip runs
     while (-not (Test-Path $log)) { Start-Sleep -Milliseconds 50 }
@@ -358,6 +468,19 @@ function Complete-Run($run) {
     if ($cfg.PostRun) {
         try { & $cfg.PostRun $log | Out-Host } catch { Write-Host "[post] failed: $_" -ForegroundColor DarkYellow }
     }
+    # toast only when the user may have looked away: after a wait, or a run longer than 20 s
+    # (a regression run toasts once at the end instead)
+    try {
+        $took = (Get-Date) - $run.Start
+        $script:lastResult = if ($run.Crash) { 'crash' } else { $run.Result }
+        if (-not $script:inRegress -and ($run.Waited -or $took.TotalSeconds -gt 20)) {
+            $what = if ($run.Crash) { "CRASH: $(([string]$report[1]).Trim())" }
+                    elseif ($run.Result -eq 'timeout') { 'time limit reached, dc-tool-ip closed' }
+                    elseif ($null -ne $run.Proc.ExitCode) { "ended, dc-tool-ip exit code $($run.Proc.ExitCode)" }
+                    else { 'ended' }
+            Send-Toast "dc_auto: $script:elfName $(if ($run.Crash) { 'crashed' } else { 'finished' })" "$what (ran $(Format-Span $took)). Log: $(Split-Path -Leaf $log)"
+        }
+    } catch { }
 }
 
 # ---------------------------------------------------------------- screenshot compare (regression)
@@ -420,6 +543,7 @@ try {
     # ------------------------------------------------------------ regression run
     if ($Regress) {
         if (-not $cfg.RegressSetup -or -not $cfg.RegressOutput) { throw 'This preset has no RegressSetup / RegressOutput.' }
+        $script:inRegress = $true
         $tests = @(. (Resolve-Path $Regress).Path)
         $regRoot = Join-Path $DevkitRoot 'logs\regress'
         $baseRoot = Join-Path $regRoot 'baseline'
@@ -494,6 +618,9 @@ try {
         $failed = @($results | Where-Object { $_.Status -notin 'PASS', 'NEW' })
         Write-Host ("[regress] {0} passed, {1} failed" -f ($results.Count - $failed.Count), $failed.Count) -ForegroundColor $(if ($failed.Count) { 'Red' } else { 'Green' })
         $script:exitCode = if ($failed.Count) { 1 } else { 0 }
+        $script:lastResult = if ($failed.Count) { 'regress-failed' } else { 'regress-passed' }
+        Send-Toast "dc_auto regression: $(if ($failed.Count) { "$($failed.Count) FAILED" } else { 'all passed' })" (
+            "{0} passed, {1} failed ({2})" -f ($results.Count - $failed.Count), $failed.Count, (Split-Path -Leaf $runDir))
     } else {
 
     # ------------------------------------------------------------ normal / -Watch loop
@@ -511,6 +638,7 @@ try {
 
         if ($r -eq 'exit') {
             Write-Host "[watch] waiting for a source change..." -ForegroundColor DarkGray
+            Set-DcState 'watching' 'waiting for a source change'
             while ((Get-SourceStamp) -eq $stamp) { Start-Sleep -Milliseconds 700 }
         } else {
             Write-Host "`n[watch] source changed while the program runs. Rebuilding; the new ELF goes up when dcload-ip is back" -ForegroundColor Yellow
@@ -529,5 +657,7 @@ try {
 } finally {
     if ($script:current -and -not $script:current.HasExited) { Stop-Process -Id $script:current.Id -Force -ErrorAction SilentlyContinue }
     Stop-ResetMonitor
+    # restores the window title; the status file says idle (with the last result) unless another dc_auto owns it now
+    Set-DcState 'idle' '' '' @() @{ last_result = $(if ($script:lastResult) { $script:lastResult } else { 'none' }); last_log = $(if ($script:lastRun) { $script:lastRun.Log }) }
 }
 if ($script:exitCode) { exit $script:exitCode }

@@ -1,6 +1,9 @@
 ---
-description: 実機の VMU を BBA で吸い出し、セーブ (bleem2 の PS1 カードを含む) を編集して書き戻す
+name: vmu-edit
+description: 実機の VMU を BBA で吸い出し、セーブ (bleem2 の PS1 メモリーカードを含む) を編集して VMU に書き戻す手順 (dc_vmu.ps1 と VMU Workbench)。「VMU を吸い出して」「このセーブの値を変えて VMU に戻して」「PS1 のカードを .mcr にして編集したい」など、実機の VMU の中身を PC で編集して戻すときに使う。
 ---
+
+# 実機の VMU を吸い出して編集し、書き戻す
 
 skill `dreamcast-bba-debug` と `vmu-save-analysis` に従う。
 
