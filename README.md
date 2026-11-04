@@ -679,6 +679,8 @@ dcdev を組み込まなくても使えます。GDmenu から dcload-ip を起�
 - bleem2 の PS1 セーブは `BLEEMMC`（PS1 メモリーカード 128KB を圧縮したもの）に入っています。`.mcr` にすると
   PS1 用のツールがそのまま使えます。メタルスラッグ X のセーブは、VMU Workbench の構造定義でランキングなどを
   名前で書き換えられます（`node third_party\vmu-workbench\cli.js fields <img> BLEEMMC`）。
+- 時計を合わせていない Dreamcast（1998 年）で bleem2 などの KallistiOS 製ソフトが書いたファイルは、日時が 1998 年と出ます
+  （KallistiOS 2.3 は 1999 年以前の年を負の数のまま書くため、以前の VMU Workbench は「2064 年」と表示していました。VMU Workbench 8e8e8d8 で修正）。
 - VMU Workbench を更新したら `scripts\sync_vmu_workbench.ps1 -From <vmu-workbench のフォルダ>` で取り込み直します（取り込むのは元のリポジトリでコミット済みの内容だけです。作業途中の変更は入りません）。
 
 ## 12. VS Code・AI エージェントで使う
