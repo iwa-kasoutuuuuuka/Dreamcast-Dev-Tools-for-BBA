@@ -688,12 +688,13 @@ dcdev を組み込まなくても使えます。GDmenu から dcload-ip を起�
 VMU のセーブをツールで解析させるときは、MCP サーバーを 1 回だけ登録して Antigravity を再起動します。
 
 ```powershell
-.\scripts\setup_agent_mcp.ps1            # ~/.gemini/antigravity/mcp_config.json に dc-vmu を追加（ほかの項目は残し、元の設定は .bak_<日時> に保存）
+.\scripts\setup_agent_mcp.ps1            # ~/.gemini/config/mcp_config.json（と、あれば Antigravity IDE の ~/.gemini/antigravity-ide/mcp_config.json）に dc-vmu を追加。ほかの項目は残し、元の設定は .bak_<日時> に保存
 .\scripts\setup_agent_mcp.ps1 -WhatIf    # 書き込まずに内容だけ表示
 .\scripts\setup_agent_mcp.ps1 -Remove    # 外す
 ```
 
-登録は開発用 PC で確認済み（2026-11-04、設定ファイルへの書き込みまで）。Antigravity からツールを呼ぶところは未確認です。
+登録は開発用 PC で確認済み（2026-11-04）：Antigravity を起動するとサーバーが起動し、ツール 19 個が `~/.gemini/antigravity/mcp/dc-vmu/` に読み込まれる。
+`~/.gemini/antigravity/mcp_config.json` は読まれないので、以前の版のスクリプトで登録した場合はもう一度実行してください。
 
 **Claude Code**：このフォルダで開くと `.claude/skills` と `.mcp.json` の `dc-vmu` が使えます（初回にサーバーの利用許可を求められます）。
 

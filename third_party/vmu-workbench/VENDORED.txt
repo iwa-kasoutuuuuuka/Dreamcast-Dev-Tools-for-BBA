@@ -1,3 +1,3 @@
 VMU Workbench, copied by scripts\sync_vmu_workbench.ps1 (do not edit here; change the original and sync again).
 Source: https://github.com/iwa-kasoutuuuuuka/vmu-workbench  (MIT, see LICENSE)
-Commit: 824c095 (uncommitted changes there were not copied)   Date: 2026-11-03
+Commit: 0614a12 (uncommitted changes there were not copied)   Date: 2026-11-04
