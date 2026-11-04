@@ -73,8 +73,11 @@ param(
 # ---------------------------------------------------------------- settings
 $cfg = @{ WatchFilter = @('*.c', '*.h', '*.s', '*.S', '*.cpp', 'Makefile', '*.mk') }
 if ($Preset) {
-    $pfile = if (Test-Path $Preset) { $Preset } else { Join-Path $DevkitRoot "profiles\$Preset.ps1" }
-    if (-not (Test-Path $pfile)) { throw "Preset not found: $pfile" }
+    # a file path (also relative, without .\), else a name in profiles\ (-PathType Leaf: a folder
+    # with the same name, e.g. H:\DC\bleem2 when run from H:\DC, is not a preset)
+    $pfile = if (Test-Path $Preset -PathType Leaf) { $Preset } else { Join-Path $DevkitRoot "profiles\$Preset.ps1" }
+    if (-not (Test-Path $pfile -PathType Leaf)) { throw "Preset not found: $pfile" }
+    $pfile = (Resolve-Path $pfile).Path    # dot-sourcing a bare relative name would look for a command
     # Dot-sourced so the preset's scriptblocks can use its variables and _common.ps1. Variable names
     # are case-insensitive, so a preset variable like $cdDir would overwrite the -CdDir parameter:
     # save the parameters first and put them back afterwards.
@@ -93,7 +96,7 @@ foreach ($k in 'Elf', 'Build', 'BuildDir', 'Iso', 'CdDir') {
 }
 if ($WatchPath)   { $cfg.Watch = $WatchPath }
 if ($WatchFilter) { $cfg.WatchFilter = $WatchFilter }
-if (-not $cfg.Elf) { throw 'No ELF. Pass -Elf or -Preset.' }
+if (-not $cfg.Elf -and -not $Analyze) { throw 'No ELF. Pass -Elf or -Preset.' }   # -Analyze can use the ELF kept with the log
 if ($cfg.Iso -and $cfg.CdDir) { throw 'Use either Iso or CdDir, not both.' }
 if (-not $cfg.BuildDir -and $cfg.Build) { $cfg.BuildDir = Split-Path -Parent $cfg.Elf }
 if ($Watch -and -not $cfg.Watch) { $cfg.Watch = @($(if ($cfg.BuildDir) { $cfg.BuildDir } else { Split-Path -Parent $cfg.Elf })) }
@@ -149,6 +152,7 @@ if ($Analyze) {
     elseif ($elfForLog -and (Test-Path $elfForLog) -and (Get-Item $elfForLog).LastWriteTime -gt (Get-Item $logPath).LastWriteTime) {
         Write-Host "[analyze] warning: $elfForLog was rebuilt after this log; function names / lines may be wrong" -ForegroundColor Yellow
     }
+    if (-not $elfForLog) { throw "No ELF kept with this log ($keptElf). Pass -Elf or -Preset." }
     $r = Get-CrashReport $logPath $elfForLog
     if ($r) { $r } else { 'No crash output found in the log.' }
     return
@@ -238,11 +242,17 @@ function Invoke-Build {
     Write-Host "`n[build] $($cfg.Build)   ($($cfg.BuildDir))" -ForegroundColor Cyan
     Set-DcState 'building'
     try {
-        # a scriptblock (preset) runs in PowerShell, a string runs in the DreamSDK shell
-        if ($cfg.Build -is [scriptblock]) { & $cfg.Build } else { Invoke-DreamSdkBash $cfg.Build $cfg.BuildDir }
+        # a scriptblock (preset) runs in PowerShell, a string runs in the DreamSDK shell.
+        # Out-Host: the compiler output goes to the console. Without it the output became the
+        # function's return value, and an array of lines plus $false read as "build OK".
+        $global:LASTEXITCODE = 0
+        if ($cfg.Build -is [scriptblock]) {
+            & $cfg.Build | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "exit code $LASTEXITCODE" }
+        } else { Invoke-DreamSdkBash $cfg.Build $cfg.BuildDir | Out-Host }
         Write-Host '[build] OK' -ForegroundColor Green; return $true
     }
-    catch { Write-Host "[build] FAILED: $_" -ForegroundColor Red; return $false }
+    catch { Write-Host "[build] FAILED: $_" -ForegroundColor Red; $script:lastResult = 'build-failed'; return $false }
 }
 
 # ---------------------------------------------------------------- reset monitor
@@ -284,18 +294,39 @@ function Stop-ResetMonitor {
     if ($script:monPs) { try { $script:monPs.Stop(); $script:monPs.Dispose() } catch { } }
 }
 
+# process names that count as "someone uses the Dreamcast": DreamSDK's dc-tool-ip and the one we run
+# (DC_TOOL_IP may point at a build with another file name)
+$script:dcToolNames = @('dc-tool-ip', [System.IO.Path]::GetFileNameWithoutExtension($dctool)) | Select-Object -Unique
+
+# Held from "dcload is ready" until our dc-tool-ip has started (Invoke-Run), so two dc_auto on this PC
+# never upload at once. Per user session and Dreamcast IP.
+$script:uploadLock = New-Object System.Threading.Mutex($false, "Local\dc_auto_upload_$($dcIp -replace '[^0-9A-Za-z]', '_')")
+$script:uploadLockHeld = $false
+function Enter-UploadLock {
+    if ($script:uploadLockHeld) { return $true }
+    try { $script:uploadLockHeld = $script:uploadLock.WaitOne(0) }
+    catch [System.Threading.AbandonedMutexException] { $script:uploadLockHeld = $true }   # its owner was killed
+    return $script:uploadLockHeld
+}
+function Exit-UploadLock {
+    if ($script:uploadLockHeld) { try { $script:uploadLock.ReleaseMutex() } catch { }; $script:uploadLockHeld = $false }
+}
+
 function Wait-Dcload($old) {
     $t0 = Get-Date; $said = ''
     $script:lastWaited = $null
     $toasted = @{}; $reasonSince = $null; $lastReason = ''    # one toast per kind of wait, per call
     $since = if ($old) { $old.StartTime } else { $script:startTime }
     while ($true) {
-        $sawReboot = $script:mon.GapEnd -gt $since
         $oldAlive = ($old -and -not $old.HasExited) -or ($WaitReboot -and -not $old)
+        # after a noexec / forced close only a reboot seen after that moment counts (set $since first)
         if ($script:needReset) { $since = $script:needReset; $oldAlive = $true }
-        $others = @(Get-Process dc-tool-ip -ErrorAction SilentlyContinue | Where-Object { -not $old -or $_.Id -ne $old.Id })
+        $sawReboot = $script:mon.GapEnd -gt $since
+        $others = @(Get-Process -Name $script:dcToolNames -ErrorAction SilentlyContinue | Where-Object { -not $old -or $_.Id -ne $old.Id })
         $up = Test-Dcload
-        if ($up -and $others.Count -eq 0 -and (-not $oldAlive -or $sawReboot)) {
+        # another dc_auto may be ready at the same moment (both saw the same dc-tool-ip end): the
+        # upload lock lets only one start its dc-tool-ip; the other then sees that one and waits
+        if ($up -and $others.Count -eq 0 -and (-not $oldAlive -or $sawReboot) -and (Enter-UploadLock)) {
             if ($old -and -not $old.HasExited) {
                 Write-Host '[wait] the Dreamcast was reset: closing the old dc-tool-ip' -ForegroundColor Yellow
                 Stop-Process -Id $old.Id -Force -ErrorAction SilentlyContinue
@@ -308,11 +339,13 @@ function Wait-Dcload($old) {
             Start-Sleep -Milliseconds 300
             return $true
         }
-        $msg = if ($script:needReset -and $others.Count -eq 0) { 'Waiting for the reset: turn the Dreamcast off, wait 5 s, turn it on and pick DCLOAD-IP in GDmenu...' }
+        $lockBusy = $up -and $others.Count -eq 0 -and (-not $oldAlive -or $sawReboot)   # ready, but another dc_auto holds the lock
+        $msg = if ($lockBusy) { 'Another dc_auto on this PC is starting its upload. Waiting for it...' }
+               elseif ($script:needReset -and $others.Count -eq 0) { 'Waiting for the reset: turn the Dreamcast off, wait 5 s, turn it on and pick DCLOAD-IP in GDmenu...' }
                elseif ($others.Count -gt 0) { "Another dc-tool-ip is running (PID $($others.Id -join ', ')). Waiting for it to end..." }
                elseif ($oldAlive) { 'A program is still running. Exit it, or reset and pick DCLOAD-IP in GDmenu...' }
                else { "No reply from $dcIp. Boot dcload-ip on the Dreamcast (GDmenu -> DCLOAD-IP BBA)..." }
-        $reason = if ($script:needReset -and $others.Count -eq 0) { 'reset' } elseif ($others.Count -gt 0) { 'other-dc-tool-ip' }
+        $reason = if ($lockBusy) { 'other-dc-auto' } elseif ($script:needReset -and $others.Count -eq 0) { 'reset' } elseif ($others.Count -gt 0) { 'other-dc-tool-ip' }
                   elseif ($oldAlive) { 'program-running' } else { 'no-dcload' }
         if ($msg -ne $said) {
             Write-Host "[wait] $msg" -ForegroundColor Yellow; $said = $msg
@@ -320,6 +353,7 @@ function Wait-Dcload($old) {
             $detail = switch ($reason) {
                 'reset'            { 'power the Dreamcast off/on, pick DCLOAD-IP' }
                 'other-dc-tool-ip' { "another dc-tool-ip (PID $($otherPids -join ', '))" }
+                'other-dc-auto'    { 'another dc_auto is starting its upload' }
                 'program-running'  { 'a program is still running' }
                 default            { "no reply from $dcIp" }
             }
@@ -377,12 +411,17 @@ function Invoke-Run([string]$stamp, [int]$TimeoutSec = 0) {
     Write-Host "`n[run] dc-tool-ip $($dcArgs -join ' ')" -ForegroundColor Cyan
     Write-Host "[run] log: $log   (/pc/ = $($root.Substring(0,3)), ELF folder = /pc$(ConvertTo-PcPath $root))"
 
-    $proc = Start-Process -FilePath $dctool -ArgumentList (($dcArgs | ForEach-Object { Q $_ }) -join ' ') `
-        -WorkingDirectory $root -NoNewWindow -PassThru `
-        -RedirectStandardOutput $log -RedirectStandardError "$log.stderr"
+    # the crash report must use the ELF that was sent: under -Watch the file is rebuilt while it runs
+    $sentElf = [System.IO.Path]::ChangeExtension($log, '.elf')
+    try { Copy-Item -LiteralPath $elfPath -Destination $sentElf -ErrorAction Stop } catch { $sentElf = $elfPath }
+    try {
+        $proc = Start-Process -FilePath $dctool -ArgumentList (($dcArgs | ForEach-Object { Q $_ }) -join ' ') `
+            -WorkingDirectory $root -NoNewWindow -PassThru `
+            -RedirectStandardOutput $log -RedirectStandardError "$log.stderr"
+    } finally { Exit-UploadLock }   # other dc_auto now see our dc-tool-ip and wait for it
     $null = $proc.Handle      # PowerShell 5.1 only keeps ExitCode if the handle was opened
     $script:current = $proc
-    $run = @{ Proc = $proc; Log = $log; Elf = $elfPath; Result = 'exit'; Done = $false; Start = (Get-Date); Waited = $script:lastWaited }
+    $run = @{ Proc = $proc; Log = $log; Elf = $sentElf; Result = 'exit'; Done = $false; Start = (Get-Date); Waited = $script:lastWaited }
     $script:lastRun = $run
     Set-DcState 'running' "dc-tool-ip PID $($proc.Id)" '' @() @{ log = $log; dc_tool_ip_pid = $proc.Id }
     if ($script:lastWaited) {
@@ -395,14 +434,19 @@ function Invoke-Run([string]$stamp, [int]$TimeoutSec = 0) {
     $fs = [System.IO.File]::Open($log, 'Open', 'Read', 'ReadWrite')
     $rd = New-Object System.IO.StreamReader($fs, (New-Object System.Text.UTF8Encoding($false)))
     $nextCheck = (Get-Date).AddSeconds(1)
-    $t0 = Get-Date; $asked = $null; $sent = $null; $started = $false
+    $t0 = Get-Date; $asked = $null; $sent = $null; $started = $false; $head = ''
     try {
         while ($true) {
             $chunk = $rd.ReadToEnd()
             if ($chunk) {
                 [Console]::Write($chunk)
-                if (-not $sent -and $chunk -match 'Transferred \d+ bytes') { $sent = Get-Date }
-                if ($chunk -match 'executing') { $started = $true }
+                # match on the text so far (a line can be split between two reads). dcload's ack is
+                # "Sending execute command (...)...executing"; "Executing at <0x...>" comes before the ack
+                if (-not $started) {
+                    $head += $chunk
+                    if (-not $sent -and $head -match 'Transferred \d+ bytes') { $sent = Get-Date }
+                    if ($head -cmatch '\.\.\.executing') { $started = $true; $head = '' }
+                }
             }
             # dcload took the ELF but never started it: the Dreamcast was not really idle in dcload
             # (an old program still sat in a dcload call). Only a reset gets it back.
@@ -413,6 +457,7 @@ function Invoke-Run([string]$stamp, [int]$TimeoutSec = 0) {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
                 $proc.WaitForExit(3000) | Out-Null
                 $script:needReset = Get-Date
+                Remove-SentElf $run
                 $run.Result = 'noexec'; break
             }
             if ($proc.HasExited) { $chunk = $rd.ReadToEnd(); if ($chunk) { [Console]::Write($chunk) }; break }
@@ -429,6 +474,8 @@ function Invoke-Run([string]$stamp, [int]$TimeoutSec = 0) {
                     Write-Host "`n[run] time limit ($TimeoutSec s): closing dc-tool-ip" -ForegroundColor Yellow
                     Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
                     $proc.WaitForExit(3000) | Out-Null
+                    # the program still runs (now without its dc-tool-ip): the next upload must wait for a reset
+                    $script:needReset = Get-Date
                     $run.Result = 'timeout'; break
                 }
             }
@@ -441,6 +488,10 @@ function Invoke-Run([string]$stamp, [int]$TimeoutSec = 0) {
     }
     if ($run.Result -notin 'changed', 'noexec') { Complete-Run $run }
     return $run
+}
+
+function Remove-SentElf($run) {
+    if ($run.Elf -and $run.Elf -like '*\logs\auto_*.elf') { Remove-Item -LiteralPath $run.Elf -ErrorAction SilentlyContinue }
 }
 
 # After dc-tool-ip ended: stderr into the log, crash report, the preset's PostRun (stats etc.).
@@ -460,12 +511,11 @@ function Complete-Run($run) {
     if ($report) {
         $crashFile = [System.IO.Path]::ChangeExtension($log, '.crash.txt')
         $report | Set-Content -LiteralPath $crashFile -Encoding utf8
-        # keep the crashed build: -Analyze on this log later still resolves the right lines
-        Copy-Item -LiteralPath $run.Elf -Destination ([System.IO.Path]::ChangeExtension($log, '.elf')) -ErrorAction SilentlyContinue
+        # the copy of the sent ELF (<log>.elf) stays: -Analyze on this log later still resolves the right lines
         $report | ForEach-Object { Write-Host $_ -ForegroundColor Red }
         Write-Host "[run] crash report: $crashFile"
         $run.Crash = $crashFile
-    }
+    } else { Remove-SentElf $run }   # no crash: the copy is not needed
     if ($cfg.PostRun) {
         try { & $cfg.PostRun $log | Out-Host } catch { Write-Host "[post] failed: $_" -ForegroundColor DarkYellow }
     }
@@ -532,7 +582,10 @@ if ($cfg.Iso) { $script:isoPath = (Resolve-Path $cfg.Iso).Path }
 elseif ($cfg.CdDir) {
     $mk = Assert-Tool 'MkIsoFs'
     New-Item -ItemType Directory -Force (Join-Path $DevkitRoot 'build') | Out-Null
-    $script:isoPath = Join-Path $DevkitRoot 'build\cdredir.iso'
+    # one ISO per dc_auto: a second dc_auto waiting for the Dreamcast must not rewrite the ISO that the
+    # running program reads as /cd (removed again at the end)
+    $script:isoPath = Join-Path $DevkitRoot "build\cdredir_$PID.iso"
+    $script:ownIso = $script:isoPath
     Write-Host "[cd] building $script:isoPath from $($cfg.CdDir)"
     Invoke-Native $mk @('-C', '0,0', '-V', 'CDREDIR', '-joliet', '-rock', '-l', '-o', $script:isoPath, (Resolve-Path $cfg.CdDir).Path) -Quiet
 }
@@ -545,7 +598,8 @@ try {
     if ($Regress) {
         if (-not $cfg.RegressSetup -or -not $cfg.RegressOutput) { throw 'This preset has no RegressSetup / RegressOutput.' }
         $script:inRegress = $true
-        $tests = @(. (Resolve-Path $Regress).Path)
+        # run in its own scope: dot-sourcing would let a test list overwrite our variables ($cfg, $WaitTimeout, ...)
+        $tests = @(& (Resolve-Path $Regress).Path)
         $regRoot = Join-Path $DevkitRoot 'logs\regress'
         $baseRoot = Join-Path $regRoot 'baseline'
         $runDir = Join-Path $regRoot (Get-Date -Format 'yyyyMMdd_HHmmss')
@@ -555,11 +609,13 @@ try {
         $results = @()
         foreach ($t in $tests) {
             Write-Host "`n[regress] === $($t.Name) ===" -ForegroundColor Cyan
-            Get-ChildItem $cfg.RegressOutput -Filter 'SHOT*.bmp' -ErrorAction SilentlyContinue | Remove-Item -Force
-            & $cfg.RegressSetup $t | Out-Host
             $timeout = if ($t.Timeout) { [int]$t.Timeout } else { 180 }
             do {
                 if (-not (Wait-Dcload $script:current)) { throw "dcload-ip was not ready within $WaitTimeout s" }
+                # set up only now that the Dreamcast is ours: while we waited, another session's program
+                # may have been using the same files (boot disc, pad script, screenshots)
+                Get-ChildItem $cfg.RegressOutput -Filter 'SHOT*.bmp' -ErrorAction SilentlyContinue | Remove-Item -Force
+                & $cfg.RegressSetup $t | Out-Host
                 $run = Invoke-Run '' -TimeoutSec $timeout
             } while ($run.Result -eq 'noexec')
             $out = Join-Path $runDir $t.Name
@@ -572,21 +628,31 @@ try {
             if ($run.Crash) { $status = 'CRASH' } elseif ($run.Result -eq 'timeout') { $status = 'TIMEOUT' } elseif ($shots.Count -eq 0) { $status = 'NOSHOT' }
             $tol = if ($t.Tolerance) { [int]$t.Tolerance } else { 24 }
             $maxDiff = if ($t.MaxDiff) { [double]$t.MaxDiff } else { 0.005 }
+            $runOk = $status -notin 'CRASH', 'TIMEOUT'     # a crashed / cut-off run never becomes the baseline
             foreach ($s in $shots) {
                 $cur = Join-Path $out $s.Name
                 $ref = Join-Path $base $s.Name
-                if ($UpdateBaseline -or -not (Test-Path $ref)) {
+                if ($runOk -and ($UpdateBaseline -or -not (Test-Path $ref))) {
                     New-Item -ItemType Directory -Force $base | Out-Null
                     Copy-Item -LiteralPath $cur -Destination $ref -Force
                     $rows += @{ Shot = $s.Name; Diff = $null; Note = 'new baseline' }
                     if ($status -eq 'PASS') { $status = 'NEW' }
                     continue
                 }
+                if (-not (Test-Path $ref)) { $rows += @{ Shot = $s.Name; Diff = $null; Note = 'no baseline (run did not end normally)' }; continue }
                 $diffPng = Join-Path $out ($s.BaseName + '_diff.png')
                 $d = [DcImgDiff]::Compare($ref, $cur, $tol, $diffPng)
                 $bad = $d -gt $maxDiff
                 if ($bad -and ($status -eq 'PASS' -or $status -eq 'NEW')) { $status = 'FAIL' }
                 $rows += @{ Shot = $s.Name; Diff = $d; Note = $(if ($bad) { 'DIFFERENT' } else { 'ok' }); DiffPng = (Split-Path -Leaf $diffPng); Ref = $ref }
+            }
+            # baseline shots this run did not make (e.g. SHOT003 before, now the run stopped after SHOT002)
+            if (-not $UpdateBaseline -and (Test-Path $base)) {
+                $made = @($shots | ForEach-Object { $_.Name })
+                foreach ($m in @(Get-ChildItem $base -Filter 'SHOT*.bmp' | Where-Object { $made -notcontains $_.Name })) {
+                    $rows += @{ Shot = $m.Name; Diff = $null; Note = 'MISSING (in the baseline, not made this time)' }
+                    if ($status -eq 'PASS' -or $status -eq 'NEW') { $status = 'FAIL' }
+                }
             }
             $color = @{ PASS = 'Green'; NEW = 'Cyan'; FAIL = 'Red'; CRASH = 'Red'; TIMEOUT = 'Red'; NOSHOT = 'Red' }[$status]
             Write-Host ("[regress] {0}: {1} ({2} shot(s))" -f $t.Name, $status, $shots.Count) -ForegroundColor $color
@@ -635,7 +701,10 @@ try {
             $r = (Invoke-Run $stamp).Result
             if ($r -eq 'noexec') { continue }     # upload again after the reset
         } else { $r = 'exit' }
-        if (-not $Watch) { break }
+        if (-not $Watch) {
+            if (-not $built) { $script:exitCode = 1 }   # nothing was sent: callers (dc_vmu, agents) must see a failure
+            break
+        }
 
         if ($r -eq 'exit') {
             Write-Host "[watch] waiting for a source change..." -ForegroundColor DarkGray
@@ -657,6 +726,8 @@ try {
     }
 } finally {
     if ($script:current -and -not $script:current.HasExited) { Stop-Process -Id $script:current.Id -Force -ErrorAction SilentlyContinue }
+    Exit-UploadLock
+    if ($script:ownIso) { Remove-Item -LiteralPath $script:ownIso -ErrorAction SilentlyContinue }
     Stop-ResetMonitor
     # restores the window title; the status file says idle (with the last result) unless another dc_auto owns it now
     Set-DcState 'idle' '' '' @() @{ last_result = $(if ($script:lastResult) { $script:lastResult } else { 'none' }); last_log = $(if ($script:lastRun) { $script:lastRun.Log }) }

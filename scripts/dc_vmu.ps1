@@ -55,9 +55,13 @@ function Invoke-Wb([string[]]$a) {
     if ($LASTEXITCODE -ne 0) { throw "vmu-workbench $($a[0]) failed" }
 }
 function Get-NewestDump {
-    $f = Get-ChildItem $vmuDir -Filter '*.bin' -File | Where-Object { $_.Name -match '^[a-d][12]_\d{8}_\d{6}(_before)?\.bin$' } |
-         Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if (-not $f) { throw "no dump in $vmuDir yet: run .\dc_vmu.ps1 -Dump first, or pass -Image" }
+    # the newest plain dump of this slot. *_before.bin (the card as it was before a -Restore) is only
+    # used when there is no plain dump: editing it and restoring it again would undo the restore
+    $all = @(Get-ChildItem $vmuDir -Filter "$($Slot)_*.bin" -File | Where-Object { $_.Name -match '^[a-d][12]_\d{8}_\d{6}(_before)?\.bin$' } |
+             Sort-Object LastWriteTime -Descending)
+    $f = @($all | Where-Object { $_.Name -notlike '*_before.bin' }) + $all | Select-Object -First 1
+    if (-not $f) { throw "no dump of $($Slot.ToUpper()) in $vmuDir yet: run .\dc_vmu.ps1 -Dump first, or pass -Image" }
+    if ($f.Name -like '*_before.bin') { Write-Host "[vmu] using $($f.Name) (the card before the last -Restore; no newer dump)" -ForegroundColor Yellow }
     return $f.FullName
 }
 
@@ -66,6 +70,13 @@ function Invoke-Transfer([string]$command) {
     $romDir = Join-Path $wb 'emu\vmutransfer'
     $pcDir = '/pc' + (ConvertTo-PcPath $vmuDir)
     if ((Split-Path -Qualifier $vmuDir) -ne (Split-Path -Qualifier $romDir)) { throw 'logs\ and third_party\ must be on the same drive (/pc/ is the drive of the ELF)' }
+    # a vmu_dump.bin left by an earlier run that failed may be the only copy of a card: keep it
+    $left = Join-Path $vmuDir 'vmu_dump.bin'
+    if ((Test-Path $left) -and (Get-Item $left).Length -eq 131072) {
+        $keep = Join-Path $vmuDir ("{0}_{1}_unsaved.bin" -f $Slot, (Get-Date -Format 'yyyyMMdd_HHmmss'))
+        Move-Item -LiteralPath $left -Destination $keep
+        Write-Host "[vmu] an earlier dump had not been saved: kept as $keep" -ForegroundColor Yellow
+    }
     foreach ($f in 'vmu_dump.bin', 'vmu_result.txt') { Remove-Item -LiteralPath (Join-Path $vmuDir $f) -ErrorAction SilentlyContinue }
     Set-Content -LiteralPath (Join-Path $vmuDir 'vmu_cmd') -Value $command -Encoding ascii -NoNewline
     $a = @{ Elf = (Join-Path $romDir 'vmutransfer.elf'); BuildDir = $romDir; Build = "make VMU_PC_DIR=$pcDir"; WaitTimeout = $WaitTimeout }
@@ -89,6 +100,7 @@ function Save-Dump([string]$suffix) {
 function Show-Image([string]$img) {
     Write-Host "`n[vmu] $img" -ForegroundColor Cyan
     Invoke-Wb @('list', $img)
+    $ErrorActionPreference = 'Continue'   # with 'Stop', any line on stderr from node throws in PowerShell 5.1
     $files = & node $cli list $img 2>$null
     if ($files -match "^$Name\s") { Write-Host "[vmu] PS1 memory card in $Name :"; & node $cli ps1-list $img $Name }
 }
@@ -110,9 +122,14 @@ elseif ($Restore) {
     }
     Copy-Item -LiteralPath $img -Destination (Join-Path $vmuDir 'vmu_restore.bin') -Force
     try { $r = Invoke-Transfer "dump restore $Slot" }
-    finally { Remove-Item -LiteralPath (Join-Path $vmuDir 'vmu_restore.bin') -ErrorAction SilentlyContinue }
-    $before = Save-Dump '_before'
-    Write-Host "[vmu] VMU before writing -> $before" -ForegroundColor Green
+    finally {
+        Remove-Item -LiteralPath (Join-Path $vmuDir 'vmu_restore.bin') -ErrorAction SilentlyContinue
+        # save the card as it was before writing even when the write failed: it may be the only good copy
+        if (Test-Path (Join-Path $vmuDir 'vmu_dump.bin')) {
+            $before = Save-Dump '_before'
+            Write-Host "[vmu] VMU before writing -> $before" -ForegroundColor Green
+        }
+    }
     Write-Host "[vmu] written and verified: $(($r | Where-Object { $_ -like 'restore*' }) -join ' ')" -ForegroundColor Green
 }
 elseif ($ExportPs1) {

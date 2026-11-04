@@ -30,7 +30,8 @@ git -C $src archive --format=tar -o (Join-Path $tmp 'src.tar') HEAD
 if ($LASTEXITCODE) { throw 'git archive failed' }
 & (Join-Path $env:SystemRoot 'System32\tar.exe') -xf (Join-Path $tmp 'src.tar') -C (Join-Path $tmp 'x')   # Windows' tar: an MSYS tar on PATH can't read C:\ paths
 if ($LASTEXITCODE) { throw 'tar failed' }
-if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
+# keep .emu\ (the MCP tools write edited saves to .emu\work\, and it holds the Flycast copy): replace the rest
+if (Test-Path $dst) { Get-ChildItem -LiteralPath $dst -Force | Where-Object Name -ne '.emu' | Remove-Item -Recurse -Force }
 foreach ($f in $files) {
     $to = Join-Path $dst $f
     New-Item -ItemType Directory -Force (Split-Path $to -Parent) | Out-Null

@@ -43,8 +43,10 @@ dc_auto.bat ─ build ─ ping 待ち ─ dc-tool-ip -x ─ logs\auto_*.txt ─ 
 - ログ：`logs\auto_日付_時刻.txt`（Dreamcast の printf / dbglog がすべて入る）
 - クラッシュ時（KOS の `Unhandled exception` / スタックトレース / `ASSERTION FAILURE` / `kernel panic`）は
   PC・PR・スタックの各アドレスを `sh-elf-addr2line` で関数名とソース行に変換し、
-  画面に赤字で表示して `logs\auto_….crash.txt` に保存します。クラッシュした回の ELF も `logs\auto_….elf` に残すので、
-  あとで `-Analyze` しても（その後に再ビルドしていても）正しい関数名・行になります。
+  画面に赤字で表示して `logs\auto_….crash.txt` に保存します。送った ELF は送る時点で `logs\auto_….elf` に写しを取り
+  （クラッシュしなかった回は終わったら消す）、解析はその写しで行います。`-Watch` で実行中に再ビルドしても、
+  あとで `-Analyze` しても、送った版の正しい関数名・行になります（`-Analyze` はこの写しがあれば `-Elf` 不要）。
+- ビルドに失敗したときはコンパイラの出力をそのまま表示し、何も送りません（`-Watch` なしなら終了コード 1）。
 - `-Watch` 中にソースを保存すると再ビルドし、dcload-ip が待ち受けに戻った時点（プログラムが `exit()` した、
   またはリセットして GDmenu から 44 を選び直した）で新しい ELF を自動で送ります。
 - **bleem2 はリセット不要**：再ビルドが成功すると dc_auto が `logs\bleem2\reload.req` を作り、bleem2 はそれを 1 秒ごとに
@@ -58,6 +60,10 @@ dc_auto.bat ─ build ─ ping 待ち ─ dc-tool-ip -x ─ logs\auto_*.txt ─ 
   または再起動を検出した（5 秒以上 ping が途切れてから復帰）」ときだけです。実行中のプログラムを上書きしないためです。
   dcload の呼び出しを数秒しないプログラムはリセットと見分けられないので、長く黙るプログラムでは `-WaitReboot` を使わず、
   プログラム側から定期的に /pc/ や printf を使ってください（bleem2 は reload.req の確認がその役目を兼ねます）。
+- この PC で dc_auto を 2 つ同時に待たせても、送るのは 1 つずつです（送る直前に排他のロックを取ります）。
+  `-CdDir` の ISO も dc_auto ごとに別のファイル（`build\cdredir_<PID>.iso`、終わったら消す）です。
+- 「受け取ったが実行しない」（noexec）の判定は、dcload の応答 `...executing` だけを見ます
+  （その前に出る `Executing at <0x…>` では判定しない。出力をすぐ書き出す dc-tool-ip でも正しく判定するため）。
 
 ## 性能の記録と回帰テスト（2026-11-03 追加、実機で確認済み）
 
@@ -69,7 +75,11 @@ dc_auto.bat ─ build ─ ping 待ち ─ dc-tool-ip -x ─ logs\auto_*.txt ─ 
     パッドスクリプトの `SHOT` は `SHOTn.bmp`（PS1 の表示領域をフルカラー）を PC に保存し、`EXIT` で dcload に戻ります。
   - 結果は `logs\regress\<日時>\<テスト名>\`。初回の画像が基準（`logs\regress\baseline\`）になり、2 回目からは比べて
     `report.html` に基準・今回・差分（赤）を並べます。失敗・クラッシュ・時間切れがあると終了コード 1。
+  - クラッシュ・時間切れの回の画像は基準にしません。基準にあるのに今回できなかった画像は「MISSING」で失敗にします。
+  - 起動ディスク・パッド入力の準備（`RegressSetup`）は、Dreamcast が空くのを待ってから行います（待っている間に、
+    別のセッションで動いているプログラムのファイルを書き換えないため）。
   - 基準を作り直すときは `-UpdateBaseline`。時間切れになると reload.req で終了を頼み、20 秒たっても終わらなければ dc-tool-ip を閉じます。
+    閉じたあともプログラムは動いたままなので、次のテストは電源の入れ直しを待ってから送ります（上書きしないため）。
   - ゲームの画像は著作物なので、基準画像は `logs\`（git の対象外）に置いたままにしてください。
 - **ビルド中のリセット**：ping の監視をバックグラウンドで常に動かすようにしたので、ビルド中にリセットしても見逃しません。
 - **送ったのに始まらないとき**：前のプログラムが dcload の呼び出しの途中で止まっていると（例：dc-tool-ip を先に閉じた）、

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <dirent.h>
 #include "dcdev.h"
 
@@ -48,10 +49,22 @@ int dcdev_vmu_backup(int port, int unit) {
         snprintf(rel, sizeof(rel), "vmu/%s/%s", tag, fname);
         f = fopen(dcdev_path(rel, path, sizeof(path)), "wb");
         if (f) {
-            fwrite(buf, 1, size, f);
-            fclose(f);
-            copied++;
-            printf("[dcdev] vmu backup %s (%d bytes)\n", path, size);
+            /* 4 KB at a time: one large write to /pc can hang dcload-ip on hardware (seen with 128 KB) */
+            size_t put = 0;
+            while (put < (size_t)size) {
+                size_t k = (size_t)size - put < 4096 ? (size_t)size - put : 4096;
+                size_t n = fwrite((char *)buf + put, 1, k, f);
+                put += n;
+                if (n != k)
+                    break;
+                fflush(f);
+            }
+            if (fclose(f) != 0 || put != (size_t)size) {
+                printf("[dcdev] vmu backup %s: only %u of %d bytes written\n", path, (unsigned)put, size);
+            } else {
+                copied++;
+                printf("[dcdev] vmu backup %s (%d bytes)\n", path, size);
+            }
         } else {
             printf("[dcdev] vmu: cannot create %s (does vmu/%s exist?)\n", path, tag);
         }
@@ -84,6 +97,9 @@ int dcdev_vmu_restore(int port, int unit) {
         size_t len = strlen(de->d_name);
 
         if (de->d_name[0] == '.' || len == 0 || len > 12)
+            continue;
+        /* files Windows puts into folders by itself (Thumbs.db is 512-byte sectors, so it would pass the size check) */
+        if (!strcasecmp(de->d_name, "Thumbs.db") || !strcasecmp(de->d_name, "desktop.ini"))
             continue;
         snprintf(path, sizeof(path), "%s/%s", dirpath, de->d_name);
         f = fopen(path, "rb");

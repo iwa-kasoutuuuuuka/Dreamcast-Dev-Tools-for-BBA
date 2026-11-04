@@ -36,11 +36,11 @@ $objs | Export-Csv -LiteralPath $csv -NoTypeInformation -Encoding utf8
 # small SVG line chart: fps (left axis 0..60) and dma / skip ms per 30 frames (right axis)
 $W = 900; $H = 260; $pad = 40
 $maxF = ($objs | Measure-Object -Property frame -Maximum).Maximum; if ($maxF -lt 1) { $maxF = 1 }
-$msVals = @($rows | ForEach-Object { $_.dma, $_.skip } | Where-Object { $_ -ne '' } | ForEach-Object { [int]$_ })
+$msVals = @($rows | ForEach-Object { $_.dma, $_.skip } | Where-Object { "$_" -ne '' } | ForEach-Object { [int]$_ })
 $maxMs = if ($msVals.Count) { [math]::Max(50, ($msVals | Measure-Object -Maximum).Maximum) } else { 50 }
 function Line($key, $max, $color) {
     $pts = foreach ($r in $rows) {
-        if ($r[$key] -eq '') { continue }
+        if ("$($r[$key])" -eq '') { continue }    # compare as text: 0 -eq '' is true in PowerShell
         $x = $pad + ($W - 2 * $pad) * $r.frame / $maxF
         $y = $H - $pad - ($H - 2 * $pad) * [math]::Min(1, [double]$r[$key] / $max)
         '{0:F1},{1:F1}' -f $x, $y

@@ -30,7 +30,7 @@ $summary = $rows | Group-Object section | ForEach-Object {
     }
 } | Sort-Object 'Avg us' -Descending
 
-$frames = $rows | Where-Object section -eq 'frame'
+$frames = @($rows | Where-Object section -eq 'frame')   # @(): one interval would have no .Count
 $over = @($frames | Where-Object { [int]$_.max_us -gt $BudgetUs * 1.05 }).Count
 Write-Host "Profile: $Csv  ($($frames.Count) intervals, budget $BudgetUs us)"
 $summary | Format-Table -AutoSize | Out-String | Write-Host
