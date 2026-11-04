@@ -47,7 +47,7 @@ GDEMU の GDmenu から dcload-ip を起動しておけば、あとは PC 側が
 |---|---|---|
 | VMU を丸ごと（128KB、ミニゲーム・コピー禁止のファイルも）PC に吸い出す | `scripts\dc_vmu.ps1 -Dump` | 確認済み（2026-11-03、PC との読み書きは 4KB ずつ） |
 | イメージを VMU に書き戻す（先に今の中身を控えとして吸い出し、全ブロックを読み直して確認） | `dc_vmu.ps1 -Restore <img>` | 確認済み（2026-11-03、同じ内容を書き戻して全ブロックの読み直しが一致） |
-| bleem2 の PS1 メモリーカード（`BLEEMMC`）を `.mcr` で出し入れ（MemcardRex などで編集） | `dc_vmu.ps1 -ExportPs1 card.mcr` / `-ImportPs1 card.mcr` | PC 上で確認 |
+| bleem2 の PS1 メモリーカード（`BLEEMMC`）を `.mcr` で出し入れ（MemcardRex などで編集） | `dc_vmu.ps1 -ExportPs1 card.mcr` / `-ImportPs1 card.mcr` | 確認済み（2026-11-04、テスト用セーブを入れたカードを実機の VMU に書き、吸い出して一致） |
 | セーブの一覧・HEX / アイコン / 名前付きの値の編集（ブラウザの GUI） | `dc_vmu.ps1 -List` / `-Gui` | PC 上で確認 |
 
 ### 新機能：AI エージェント（Antigravity / Claude Code）対応（2026-11）
@@ -692,6 +692,8 @@ VMU のセーブをツールで解析させるときは、MCP サーバーを 1 
 .\scripts\setup_agent_mcp.ps1 -WhatIf    # 書き込まずに内容だけ表示
 .\scripts\setup_agent_mcp.ps1 -Remove    # 外す
 ```
+
+登録は開発用 PC で確認済み（2026-11-04、設定ファイルへの書き込みまで）。Antigravity からツールを呼ぶところは未確認です。
 
 **Claude Code**：このフォルダで開くと `.claude/skills` と `.mcp.json` の `dc-vmu` が使えます（初回にサーバーの利用許可を求められます）。
 
