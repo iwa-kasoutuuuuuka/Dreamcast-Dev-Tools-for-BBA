@@ -27,7 +27,7 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $MaxUnits = 16
-$unitsFile = Join-Path $DevkitRoot 'config\units.json'
+$unitsFile = if ($env:DC_GUI_UNITS) { $env:DC_GUI_UNITS } else { Join-Path $DevkitRoot 'config\units.json' }   # env: another unit list (tests, screenshots)
 $unitsRoot = Join-Path $DevkitRoot 'logs\units'
 $autoPs1 = Join-Path $PSScriptRoot 'dc_auto.ps1'
 $vmuPs1 = Join-Path $PSScriptRoot 'dc_vmu.ps1'
@@ -568,8 +568,8 @@ if ($SelfTest -eq 'jobs') {
 Restore-Jobs
 Update-Grid -Rebuild
 if ($SelfTest -eq 'shot') {
-    $form.Show(); [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 800
-    Update-Grid; [System.Windows.Forms.Application]::DoEvents()
+    $form.Show(); [System.Windows.Forms.Application]::DoEvents()
+    foreach ($i in 1..3) { Start-Sleep -Milliseconds 700; Update-Grid; [System.Windows.Forms.Application]::DoEvents() }   # ping results come in
     $bmp = New-Object System.Drawing.Bitmap($form.Width, $form.Height)
     $form.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle(0, 0, $form.Width, $form.Height)))
     $png = Join-Path $DevkitRoot 'logs\gui_selftest.png'
