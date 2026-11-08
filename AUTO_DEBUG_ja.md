@@ -27,6 +27,9 @@ dc_auto.bat ─ build ─ ping 待ち ─ dc-tool-ip -x ─ logs\auto_*.txt ─ 
    リンクが来ている有線 LAN に 192.168.10.1 を付け、dc-tool-ip の受信を 192.168.10.x からだけ許可します。
    Wi-Fi のインターネット接続はそのままです。戻すときは `-Undo`。
    最後に `Dreamcast 192.168.10.2 answers ping. Ready.` と出れば OK。
+   Dreamcast 2 台を USB-LAN などで別のアダプターにつなぐときは、2 台目を別のサブネットにして
+   `setup_pc_network.ps1 -Adapter "イーサネット 3" -PcIp 192.168.11.1 -DcIp 192.168.11.2` を実行します
+   （1 台目のファイアウォールの許可は残ります。詳しくは README の 4 章「パターン C」）。
 
 ## 毎回の使い方
 

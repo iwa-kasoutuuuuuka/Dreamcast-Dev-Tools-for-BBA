@@ -33,6 +33,7 @@ GDEMU の GDmenu から dcload-ip を起動しておけば、あとは PC 側が
 | 実行ごとの後処理（例：性能の CSV / グラフ化） | プリセットの `PostRun` | 確認済み（bleem2） |
 | 待っている・送った・終わったを Windows の通知で知らせる。待っている間はウィンドウのタイトルに理由、状態は `logs\dc_auto_status.txt` | 自動（`-NoNotify` で通知なし） | 確認済み（2026-11-04、実機の「リセットしてください」の通知も） |
 | PC 側のネットワーク設定（固定 IP・ファイアウォール）を 1 回で | 管理者で `scripts\setup_pc_network.ps1`（`-Undo` で元に戻す） | 確認済み |
+| Dreamcast 2 台を別々の LAN アダプター（USB-LAN など）で：サブネットごとにファイアウォールの規則、サブネットの重なりを検出（4 章のパターン C） | 管理者で `setup_pc_network.ps1 -Adapter <名前> -PcIp 192.168.11.1` | アドレス計算は PC 上でテスト済み（2026-11-08）。2 台・USB-LAN での実機は未確認 |
 
 プリセット（`profiles\*.ps1`）に ELF・ビルドコマンド・監視するフォルダなどを書きます。`profiles\hello_bba.ps1`（サンプル）と
 `profiles\bleem2.ps1`（PS1 エミュレーター bleem2 での実例：ディスクを `/pc/` から読む、デバッグファイルを PC に保存、回帰テスト）があります。
@@ -274,6 +275,32 @@ DHCP サーバーが無いので、両方に固定 IP を設定します。
 3. `config\bba.config.ps1` に `$DcIp = '192.168.10.2'`。
 
 > Wi-Fi でインターネットに繋いだまま、有線 LAN だけ Dreamcast 用にする使い方ができます。
+
+### パターン C：Dreamcast を 2 台
+
+どちらのつなぎ方でも、2 台目用に別の IP の dcload-ip を作り、送るときに `-Ip` で台を選びます
+（`dc_auto.ps1 -Ip 192.168.10.3 …`。`config\bba.config.ps1` の `$DcIp` は `-Ip` を省いたときの 1 台）。
+
+- **ハブ 1 つ（同じサブネット）**：`PC ─ ハブ ─ DC 2 台`。2 台目は `make_dcload_disc.ps1 -Ip 192.168.10.3`。
+  PC 側の設定は 1 台のときのままで使えます。
+- **PC に LAN をもう 1 つ（USB-LAN など）**：台ごとにアダプターを分けます。**サブネットは必ず別にします**
+  （同じ 192.168.10.x を 2 つのアダプターに付けると、Windows はどちらか一方からしか送りません）。
+  ```powershell
+  .\scripts\setup_pc_network.ps1 -Adapter "イーサネット" -PcIp 192.168.10.1 -DcIp 192.168.10.2
+  .\scripts\setup_pc_network.ps1 -Adapter "イーサネット 3" -PcIp 192.168.11.1 -DcIp 192.168.11.2
+  .\scripts\make_dcload_disc.ps1 -Ip 192.168.11.2
+  ```
+  アダプター名は `Get-NetAdapter` で確認。ファイアウォールの許可はサブネットごとに別の規則
+  （`Dreamcast dc-tool-ip (BBA) 192.168.11.0/24` など）になり、2 回目を実行しても 1 台目の許可は残ります。
+  別のアダプターが同じサブネットを使っているときは何も変えずに止まります。`-Undo` はそのアダプターのサブネットの規則だけを消します。
+  2026-11-08 より前に作った規則（名前が `Dreamcast dc-tool-ip (BBA)` だけのもの）は、同じサブネットで実行し直すと新しい名前に置き換わります。
+
+2 台同時に使えるのは `dc_auto`（ビルド・送信・ログ・クラッシュ解析・`-Watch`）です。送信の排他と応答の確認は IP ごと、
+dc-tool-ip は PC 側のポートを毎回別にとるので、PowerShell を 2 つ開いて別の `-Ip` で動かせます。
+次のものは **1 台ずつ** 使ってください：`dc_vmu.ps1`（`logs\vmu\` の作業ファイルが 1 組）、GDB（PC のポート 2159 は 1 つ）、
+bleem2 のデバッグファイル（BLEEMLOG・SHOTn・reload.req の置き場がビルドで 1 つ）。
+ログの名前は秒までの日時なので、2 台がまったく同じ秒に始めると同じファイルになります。
+2 台での動作はまだ実機で試していません。
 
 ### 疎通確認
 
@@ -798,7 +825,7 @@ dcdev は KallistiOS の模擬ヘッダー（`tests/mock/`）を使って PC 上
 .\tests\run_tests.ps1
 ```
 
-`46 checks, 0 failed` と出れば OK です。
+`46 checks, 0 failed` と `network: 12 passed, 0 failed`（`setup_pc_network.ps1` のアドレス計算。設定は何も変えません）が出れば OK です。
 
 ---
 

@@ -23,3 +23,5 @@ $work = Join-Path $build 'pc'
 New-Item -ItemType Directory -Force $work | Out-Null
 & $exe $work
 if ($LASTEXITCODE -ne 0) { throw "dcdev tests failed" }
+
+& (Join-Path $PSScriptRoot 'test_network.ps1')
