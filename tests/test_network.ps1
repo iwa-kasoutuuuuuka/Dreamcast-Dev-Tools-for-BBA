@@ -22,5 +22,20 @@ T 'rule per subnet' (Get-RuleName '192.168.11.0/24') 'Dreamcast dc-tool-ip (BBA)
 # an old rule shows its address as 192.168.10.0/255.255.255.0 in Get-NetFirewallAddressFilter
 T 'address forms'   ((Get-SubnetForms '192.168.10.0/24') -join ',') '192.168.10.0/24,192.168.10.0/255.255.255.0'
 T 'other forms'     ((Get-SubnetForms '192.168.11.0/24') -contains '192.168.10.0/255.255.255.0') $false
+
+# Get-SubnetUsers with a stand-in Get-NetIPAddress (a function wins over the cmdlet): Dreamcast 1 on a USB-LAN
+# adapter that is unplugged (its fixed address is still listed), on-board LAN with no address, Wi-Fi at home
+function Get-NetIPAddress {
+    @([pscustomobject]@{ InterfaceIndex = 10; InterfaceAlias = 'usb';      IPAddress = '192.168.10.1';    PrefixLength = 24 },
+      [pscustomobject]@{ InterfaceIndex = 5;  InterfaceAlias = 'onboard';  IPAddress = '169.254.218.100'; PrefixLength = 16 },
+      [pscustomobject]@{ InterfaceIndex = 11; InterfaceAlias = 'wifi';     IPAddress = '192.168.128.129'; PrefixLength = 24 },
+      [pscustomobject]@{ InterfaceIndex = 1;  InterfaceAlias = 'loopback'; IPAddress = '127.0.0.1';       PrefixLength = 8 })
+}
+T 'second subnet free'      (Get-SubnetUsers '192.168.11.0/24' 5).Count 0
+T 'first subnet is taken'   ((Get-SubnetUsers '192.168.10.0/24' 5) | ForEach-Object InterfaceAlias) 'usb'
+T 'own adapter not a clash' (Get-SubnetUsers '192.168.10.0/24' 10).Count 0
+T 'wider net covers it'     ((Get-SubnetUsers '192.168.0.0/16' 5) | ForEach-Object InterfaceAlias) 'usb wifi'
+T 'link-local ignored'      (Get-SubnetUsers '169.254.0.0/16' 10).Count 0
+Remove-Item function:Get-NetIPAddress
 Write-Host "network: $script:ok passed, $script:bad failed"
 if ($script:bad) { throw 'network tests failed' }

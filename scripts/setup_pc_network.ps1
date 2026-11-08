@@ -61,6 +61,14 @@ function Get-SubnetForms([string]$subnet) {
     [Array]::Reverse($b)
     return @($subnet, "$net/$(New-Object Net.IPAddress (, $b))")
 }
+# addresses of other adapters that overlap $subnet (link-local 169.254.x.x does not count).
+# Get-NetIPAddress also lists a fixed address of an unplugged adapter, so a Dreamcast that is off still counts.
+function Get-SubnetUsers([string]$subnet, [int]$exceptIndex) {
+    $ip = ($subnet -split '/')[0]
+    return @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+             Where-Object { $_.InterfaceIndex -ne $exceptIndex -and $_.IPAddress -notlike '169.254.*' -and
+                            ((Test-InSubnet $_.IPAddress $subnet) -or (Test-InSubnet $ip (Get-Subnet $_.IPAddress $_.PrefixLength))) })
+}
 
 if ($MyInvocation.InvocationName -eq '.') { return }   # dot-sourced by the tests: functions only
 
@@ -97,9 +105,15 @@ Write-Host "Adapter: $($nic.Name) ($($nic.InterfaceDescription))"
 if ($Undo) {
     $manual = @(Get-NetIPAddress -InterfaceIndex $nic.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
                 Where-Object PrefixOrigin -eq 'Manual')
+    # no fixed address (already undone): fall back to -PcIp/-Prefix, the default 192.168.10.0/24 included
     $subnets = if ($manual.Count) { @($manual | ForEach-Object { Get-Subnet $_.IPAddress $_.PrefixLength }) }
                else { @(Get-Subnet $PcIp $Prefix) }
-    foreach ($s in $subnets | Select-Object -Unique) { Remove-DcRule $s; Write-Host "Firewall rule for $s removed." }
+    foreach ($s in $subnets | Select-Object -Unique) {
+        # the rule also lets in the Dreamcast of any other adapter in that subnet: keep it then
+        $users = Get-SubnetUsers $s $nic.ifIndex
+        if ($users.Count) { Write-Host "Firewall rule for $s kept: $(($users | ForEach-Object { "$($_.InterfaceAlias) $($_.IPAddress)" }) -join ', ') uses it." -ForegroundColor Yellow }
+        else { Remove-DcRule $s; Write-Host "Firewall rule for $s removed." }
+    }
     $manual | Remove-NetIPAddress -Confirm:$false
     Set-NetIPInterface -InterfaceIndex $nic.ifIndex -Dhcp Enabled
     Write-Host 'Back to DHCP.'
@@ -109,9 +123,11 @@ if ($Undo) {
 $subnet = Get-Subnet $PcIp $Prefix
 
 # two adapters in one subnet: Windows picks one route and the other Dreamcast gets nothing
-$clash = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-           Where-Object { $_.InterfaceIndex -ne $nic.ifIndex -and $_.IPAddress -notlike '169.254.*' -and
-                          ((Test-InSubnet $_.IPAddress $subnet) -or (Test-InSubnet $PcIp (Get-Subnet $_.IPAddress $_.PrefixLength))) })
+$hostPart = (ConvertTo-IpNumber $PcIp) -band -bnot (Get-Mask $Prefix) -band 0xFFFFFFFFL
+if ($hostPart -eq 0 -or $hostPart -eq ([math]::Pow(2, 32 - $Prefix) - 1)) { throw "-PcIp $PcIp is the network or broadcast address of $subnet (use e.g. $(($subnet -split '/')[0] -replace '\.0$', '.1'))." }
+if ($DcIp -and -not (Test-InSubnet $DcIp $subnet)) { throw "-DcIp $DcIp is not in $subnet (the subnet of -PcIp $PcIp)." }
+if ($DcIp -eq $PcIp) { throw "-DcIp and -PcIp are the same address ($PcIp)." }
+$clash = Get-SubnetUsers $subnet $nic.ifIndex
 if ($clash.Count) {
     $clash | Format-Table InterfaceAlias, IPAddress, PrefixLength -AutoSize | Out-Host
     throw "$subnet is already used by another adapter (above). Give this adapter another subnet, e.g. -PcIp 192.168.11.1."
