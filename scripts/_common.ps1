@@ -9,7 +9,8 @@ $DreamSDK = if ($env:DREAMSDK_HOME) { $env:DREAMSDK_HOME } else { 'C:\DreamSDK' 
 $DcRoot   = Join-Path $DreamSDK 'opt\toolchains\dc'
 
 $Tools = @{
-    DcToolIp = Join-Path $DcRoot 'bin\dc-tool-ip.exe'
+    # DC_TOOL_IP: use another dc-tool-ip build (e.g. one with syscall retransmission) instead of DreamSDK's
+    DcToolIp = if ($env:DC_TOOL_IP) { $env:DC_TOOL_IP } else { Join-Path $DcRoot 'bin\dc-tool-ip.exe' }
     Gdb      = Join-Path $DcRoot 'sh-elf\bin\sh-elf-gdb.exe'
     Gcc      = Join-Path $DcRoot 'sh-elf\bin\sh-elf-gcc.exe'
     Objcopy  = Join-Path $DcRoot 'sh-elf\bin\sh-elf-objcopy.exe'
