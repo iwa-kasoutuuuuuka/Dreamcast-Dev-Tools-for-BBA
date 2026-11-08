@@ -15,6 +15,8 @@ dc_auto.bat ─ build ─ ping 待ち ─ dc-tool-ip -x ─ logs\auto_*.txt ─ 
       └──────── ソースを保存すると自動で再ビルド・再実行 ◄───┘
 ```
 
+なぜこう動くのか（ping と dcload の関係、noexec、リセットが要る場面など）は [KNOWHOW_ja.md](KNOWHOW_ja.md) を参照。
+
 ## 最初に 1 回だけ
 
 1. **SD カードに dcload-ip を入れる**

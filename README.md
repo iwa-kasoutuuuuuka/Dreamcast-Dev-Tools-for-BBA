@@ -10,6 +10,9 @@ CD-R を毎回焼く必要がなくなり、「ビルド → 数秒で実機起�
 
 さらに、自分のプログラムに組み込める小さな C ライブラリ **dcdev** と **VS Code 設定**が付いています。
 
+実機で開発していて分かった「はまりどころ」とその理由（ping が返っても dcload が空いているとは限らない、/cd/ リダイレクトが KallistiOS 2.3 で動かない、
+/pc/ への大きな書き込みで固まる、など）は **[KNOWHOW_ja.md](KNOWHOW_ja.md)** にまとめています。
+
 | 機能 | 使い方 |
 |---|---|
 | 画面キャプチャを PC に保存（BMP） | L+R トリガーを押しながら A、または `dcdev_screenshot()` |
@@ -164,6 +167,7 @@ dc_auto を 2 つ同時に待たせても 1 つずつ送る、クラッシュ・
 Dreamcast-Dev-Tools-for-BBA/
 ├─ README.md                    このファイル
 ├─ AUTO_DEBUG_ja.md             自動デバッグループ dc_auto の使い方
+├─ KNOWHOW_ja.md                BBA 開発のノウハウ（はまりどころと理由）
 ├─ dc_auto.bat                  dc_auto をダブルクリックで（引数なし = bleem2 を -Watch で）
 ├─ dc_gui.bat                   GUI（Dreamcast 最大 16 台の登録・実行・停止・ログ・VMU）をダブルクリックで
 ├─ profiles/                    dc_auto のプリセット（hello_bba / bleem2 / bleem2_regress / bleem2_stats）
