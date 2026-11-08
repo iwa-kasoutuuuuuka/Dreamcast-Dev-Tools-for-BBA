@@ -13,6 +13,11 @@
   -List     files on an image (and the PS1 saves inside BLEEMMC).
   -Gui      starts the VMU Workbench editor (http://localhost:8765/) for hex / icon / named-field editing.
 
+  Several Dreamcasts: -Ip picks the Dreamcast, -Unit <name> puts its name in front of the dump names
+  (<unit>_a1_<date>.bin) so the dumps of different Dreamcasts stay apart. Dump / restore use one set of
+  work files in logs\vmu (built into the transfer program), so they run on one Dreamcast at a time:
+  a second dc_vmu waits until the first is done.
+
   Dump and restore run emu\vmutransfer from VMU Workbench through dc_auto.ps1 (build -> wait for
   dcload-ip -> upload -> the program does the job, writes logs\vmu\vmu_result.txt and returns to dcload).
   Needs Node.js for the editing commands.
@@ -36,6 +41,7 @@ param(
     [string]$Ip,
     [int]$WaitTimeout = 0,
     [switch]$NoNotify,               # passed to dc_auto.ps1: no toast notifications
+    [ValidatePattern('^[A-Za-z0-9_-]{1,16}$')] [string]$Unit,   # passed to dc_auto.ps1; also the dump name prefix
     [switch]$Yes
 )
 $ErrorActionPreference = 'Stop'
@@ -48,6 +54,7 @@ $vmuDir = Join-Path $root 'logs\vmu'
 New-Item -ItemType Directory -Force $vmuDir | Out-Null
 $env:DCVMU_HISTORY_DIR = Join-Path $vmuDir 'history'     # VMU Workbench backs up an image before each change
 $Slot = $Slot.ToLower()
+$prefix = if ($Unit) { "$($Unit)_" } else { '' }     # dumps: [<unit>_]<slot>_<date>[_before].bin
 
 function Invoke-Wb([string[]]$a) {
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'Node.js (node) is needed for this command: https://nodejs.org/' }
@@ -57,15 +64,34 @@ function Invoke-Wb([string[]]$a) {
 function Get-NewestDump {
     # the newest plain dump of this slot. *_before.bin (the card as it was before a -Restore) is only
     # used when there is no plain dump: editing it and restoring it again would undo the restore
-    $all = @(Get-ChildItem $vmuDir -Filter "$($Slot)_*.bin" -File | Where-Object { $_.Name -match '^[a-d][12]_\d{8}_\d{6}(_before)?\.bin$' } |
+    $pat = '^' + [regex]::Escape($prefix + $Slot) + '_\d{8}_\d{6}(_before)?\.bin$'
+    $all = @(Get-ChildItem $vmuDir -Filter "$prefix$($Slot)_*.bin" -File | Where-Object { $_.Name -match $pat } |
              Sort-Object LastWriteTime -Descending)
     $f = @($all | Where-Object { $_.Name -notlike '*_before.bin' }) + $all | Select-Object -First 1
-    if (-not $f) { throw "no dump of $($Slot.ToUpper()) in $vmuDir yet: run .\dc_vmu.ps1 -Dump first, or pass -Image" }
+    if (-not $f) { throw "no dump of $($Slot.ToUpper())$(if ($Unit) { " of $Unit" }) in $vmuDir yet: run .\dc_vmu.ps1 -Dump first, or pass -Image" }
     if ($f.Name -like '*_before.bin') { Write-Host "[vmu] using $($f.Name) (the card before the last -Restore; no newer dump)" -ForegroundColor Yellow }
     return $f.FullName
 }
 
 # Runs vmutransfer once with the given command ("dump a1" / "dump restore a1"); returns the result lines.
+# The work files (vmu_cmd, vmu_dump.bin, vmu_result.txt, vmu_restore.bin) are one set for every Dreamcast:
+# the caller holds the transfer lock (Enter-TransferLock) from before it writes them until it has read them.
+$script:transferLock = New-Object System.Threading.Mutex($false, 'Local\dc_vmu_transfer')
+$script:transferHeld = $false
+function Enter-TransferLock {
+    $said = $false
+    while (-not $script:transferHeld) {
+        try { $script:transferHeld = $script:transferLock.WaitOne(1000) }
+        catch [System.Threading.AbandonedMutexException] { $script:transferHeld = $true }   # its owner was killed
+        if (-not $script:transferHeld -and -not $said) {
+            Write-Host '[vmu] another dc_vmu is using the VMU transfer (one Dreamcast at a time): waiting for it...' -ForegroundColor Yellow
+            $said = $true
+        }
+    }
+}
+function Exit-TransferLock {
+    if ($script:transferHeld) { try { $script:transferLock.ReleaseMutex() } catch { }; $script:transferHeld = $false }
+}
 function Invoke-Transfer([string]$command) {
     $romDir = Join-Path $wb 'emu\vmutransfer'
     $pcDir = '/pc' + (ConvertTo-PcPath $vmuDir)
@@ -73,7 +99,7 @@ function Invoke-Transfer([string]$command) {
     # a vmu_dump.bin left by an earlier run that failed may be the only copy of a card: keep it
     $left = Join-Path $vmuDir 'vmu_dump.bin'
     if ((Test-Path $left) -and (Get-Item $left).Length -eq 131072) {
-        $keep = Join-Path $vmuDir ("{0}_{1}_unsaved.bin" -f $Slot, (Get-Date -Format 'yyyyMMdd_HHmmss'))
+        $keep = Join-Path $vmuDir ("{0}{1}_{2}_unsaved.bin" -f $prefix, $Slot, (Get-Date -Format 'yyyyMMdd_HHmmss'))
         Move-Item -LiteralPath $left -Destination $keep
         Write-Host "[vmu] an earlier dump had not been saved: kept as $keep" -ForegroundColor Yellow
     }
@@ -82,6 +108,7 @@ function Invoke-Transfer([string]$command) {
     $a = @{ Elf = (Join-Path $romDir 'vmutransfer.elf'); BuildDir = $romDir; Build = "make VMU_PC_DIR=$pcDir"; WaitTimeout = $WaitTimeout }
     if ($Ip) { $a.Ip = $Ip }
     if ($NoNotify) { $a.NoNotify = $true }
+    if ($Unit) { $a.Unit = $Unit }
     & (Join-Path $PSScriptRoot 'dc_auto.ps1') @a
     Remove-Item -LiteralPath (Join-Path $vmuDir 'vmu_cmd') -ErrorAction SilentlyContinue
     $res = Join-Path $vmuDir 'vmu_result.txt'
@@ -93,7 +120,7 @@ function Invoke-Transfer([string]$command) {
 function Save-Dump([string]$suffix) {
     $tmp = Join-Path $vmuDir 'vmu_dump.bin'
     if (-not (Test-Path $tmp) -or (Get-Item $tmp).Length -ne 131072) { throw 'the dump did not arrive (vmu_dump.bin missing or not 128 KB)' }
-    $out = Join-Path $vmuDir ("{0}_{1}{2}.bin" -f $Slot, (Get-Date -Format 'yyyyMMdd_HHmmss'), $suffix)
+    $out = Join-Path $vmuDir ("{0}{1}_{2}{3}.bin" -f $prefix, $Slot, (Get-Date -Format 'yyyyMMdd_HHmmss'), $suffix)
     Move-Item -LiteralPath $tmp -Destination $out -Force
     return $out
 }
@@ -106,8 +133,11 @@ function Show-Image([string]$img) {
 }
 
 if ($Dump) {
-    Invoke-Transfer "dump $Slot" | Out-Null
-    $out = Save-Dump ''
+    Enter-TransferLock
+    try {
+        Invoke-Transfer "dump $Slot" | Out-Null
+        $out = Save-Dump ''
+    } finally { Exit-TransferLock }
     Write-Host "[vmu] dumped $($Slot.ToUpper()) -> $out" -ForegroundColor Green
     Show-Image $out
 }
@@ -120,16 +150,19 @@ elseif ($Restore) {
         Write-Host 'The VMU is dumped first (logs\vmu\*_before.bin), so it can be put back.' -ForegroundColor Yellow
         if ((Read-Host 'Type yes to write') -ne 'yes') { Write-Host '[vmu] cancelled'; return }
     }
-    Copy-Item -LiteralPath $img -Destination (Join-Path $vmuDir 'vmu_restore.bin') -Force
-    try { $r = Invoke-Transfer "dump restore $Slot" }
-    finally {
-        Remove-Item -LiteralPath (Join-Path $vmuDir 'vmu_restore.bin') -ErrorAction SilentlyContinue
-        # save the card as it was before writing even when the write failed: it may be the only good copy
-        if (Test-Path (Join-Path $vmuDir 'vmu_dump.bin')) {
-            $before = Save-Dump '_before'
-            Write-Host "[vmu] VMU before writing -> $before" -ForegroundColor Green
+    Enter-TransferLock
+    try {
+        Copy-Item -LiteralPath $img -Destination (Join-Path $vmuDir 'vmu_restore.bin') -Force
+        try { $r = Invoke-Transfer "dump restore $Slot" }
+        finally {
+            Remove-Item -LiteralPath (Join-Path $vmuDir 'vmu_restore.bin') -ErrorAction SilentlyContinue
+            # save the card as it was before writing even when the write failed: it may be the only good copy
+            if (Test-Path (Join-Path $vmuDir 'vmu_dump.bin')) {
+                $before = Save-Dump '_before'
+                Write-Host "[vmu] VMU before writing -> $before" -ForegroundColor Green
+            }
         }
-    }
+    } finally { Exit-TransferLock }
     Write-Host "[vmu] written and verified: $(($r | Where-Object { $_ -like 'restore*' }) -join ' ')" -ForegroundColor Green
 }
 elseif ($ExportPs1) {

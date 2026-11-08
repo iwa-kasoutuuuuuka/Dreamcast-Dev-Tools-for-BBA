@@ -31,6 +31,13 @@ dc_auto.bat ─ build ─ ping 待ち ─ dc-tool-ip -x ─ logs\auto_*.txt ─ 
    `setup_pc_network.ps1 -Adapter "イーサネット 3" -PcIp 192.168.11.1 -DcIp 192.168.11.2` を実行します
    （1 台目のファイアウォールの許可は残ります。詳しくは README の 4 章「パターン C」）。
 
+## GUI で使う（2026-11-08 追加）
+
+`dc_gui.bat` をダブルクリックすると、Dreamcast を最大 16 台まで登録して、実行・監視実行・停止・ログ・クラッシュ報告・VMU の
+吸い出し / 書き戻しをボタンでできます（1 台でも使える）。台ごとの状態（dcload の応答、待っている理由、前回の結果）が 1 秒ごとに出ます。
+複数台では転送・実行は同時に進み、同じフォルダのビルド・bleem2・VMU 転送・GDB は自動で 1 台ずつ順番になります。
+ログは `logs\units\<名前>\`。詳しくは README の 6-5 章。
+
 ## 毎回の使い方
 
 | やりたいこと | 操作 |
@@ -131,6 +138,8 @@ dc_auto.bat ─ build ─ ping 待ち ─ dc-tool-ip -x ─ logs\auto_*.txt ─ 
 | `dc_auto.bat` | ダブルクリック用（引数なし = bleem2 を `-Watch` で） |
 | `scripts\dc_auto.ps1` | 自動デバッグループ本体 |
 | `scripts\setup_pc_network.ps1` | PC の固定 IP + ファイアウォール（管理者で 1 回） |
+| `dc_gui.bat` / `scripts\dc_gui.ps1` | GUI（最大 16 台）。台の設定は `config\units.json` |
+| `logs\units\<名前>\` | GUI・`-Unit` で動かした台のログ・クラッシュ報告・`dc_auto_status.txt`・GUI の出力 |
 | `profiles\bleem2.ps1` / `profiles\hello_bba.ps1` | プリセット（ELF・ビルドコマンド・監視するフォルダ） |
 | `config\bba.config.ps1` | Dreamcast の IP（192.168.10.2） |
 | `out\dcload-ip_gdemu.cdi` | GDEMU 用 dcload-ip（mkdcdisc 製、= gdemu_sd_cdpark\44\disc.cdi） |

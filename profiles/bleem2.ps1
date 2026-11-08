@@ -23,6 +23,9 @@ $preset_stats = Join-Path $PSScriptRoot 'bleem2_stats.ps1'
     Watch    = @((Join-Path $preset_bleem 'src'), (Join-Path $preset_bleem 'Makefile'))
     # -Watch: after a rebuild this file asks the running bleem2 to return to dcload (no reset needed)
     ReloadReq = Join-Path $preset_logs 'reload.req'
+    # logs\bleem2 (debug files, reload.req, BOOTDISC, BLEEMPAD, SHOTn) and build\bleem2_cd are one set
+    # on the PC, built into bleem2: with several Dreamcasts, bleem2 runs on one at a time
+    Exclusive = 'bleem2'
     Prepare  = {
         $game = Join-Path $preset_bleem 'build\Metal Slug X (USA).bin'
         New-Item -ItemType Directory -Force (Join-Path $preset_disc 'psbios') | Out-Null

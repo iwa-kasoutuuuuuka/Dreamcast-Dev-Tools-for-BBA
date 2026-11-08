@@ -19,3 +19,6 @@ sample/hello_bba/host/screenshots/
 sample/hello_bba/host/logs/
 sample/hello_bba/host/prof/
 sample/hello_bba/host/vmu/
+
+# Dreamcasts registered in dc_gui (personal network settings)
+config/units.json

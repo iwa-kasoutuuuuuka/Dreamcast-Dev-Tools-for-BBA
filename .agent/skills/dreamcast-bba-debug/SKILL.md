@@ -24,6 +24,10 @@ PowerShell の実行ポリシーで `.\scripts\x.ps1` が止まることがあ�
 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dc_auto.ps1 ...` で起動する (設定は変えない)。
 長く動くもの (`-Watch`、`-Regress`、実機を待つもの) は、利用者が見られるターミナルで動かす。
 
+Dreamcast が複数台 (最大 16 台、`config\units.json` に名前と IP) のときは、どの台かを利用者に確かめて
+`dc_auto.ps1 -Unit <名前> -Ip <IP>` / `dc_vmu.ps1 -Unit <名前> -Ip <IP>` で動かす。その台のログ・クラッシュ報告・状態は
+`logs\units\<名前>\` (`dc_auto_status.txt`)。利用者が GUI (`dc_gui.bat`) で動かしている台は、GUI から止めてもらう。
+
 ## 準備ができているか
 
 1. PC と Dreamcast が LAN でつながっている (`Test-Connection 192.168.10.2`。IP は `config\bba.config.ps1`)。
